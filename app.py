@@ -50,6 +50,9 @@ hr{border-color:#2a2f3e!important;}
 .badge-amarelo{background:#2e200d;color:#f59e0b;padding:2px 8px;border-radius:6px;font-size:.8rem;font-weight:600;}
 .upload-section{background:linear-gradient(135deg,#1a2035 0%,#161b27 100%);border:1px dashed #3a4560;border-radius:14px;padding:30px;text-align:center;margin:20px 0;}
 .source-status{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;font-family:'DM Mono',monospace;color:#6b7a99;}
+.sparkline-wrap{display:inline-flex;align-items:center;gap:8px;vertical-align:middle;}
+.kpi-trend{font-size:.7rem;color:#6b7a99;font-family:'DM Mono',monospace;white-space:nowrap;}
+.badge-neutro{background:#1a2035;color:#8896b3;padding:2px 8px;border-radius:6px;font-size:.8rem;font-weight:600;}
 [data-baseweb="tab-list"]{background-color:#161b27!important;border-bottom:1px solid #2a3350!important;gap:4px;}
 [data-baseweb="tab"]{color:#8896b3!important;font-weight:500!important;}
 [aria-selected="true"]{color:#fff!important;border-bottom:2px solid #4a7cff!important;}
@@ -297,6 +300,23 @@ def preparar_df(df: pd.DataFrame) -> pd.DataFrame:
     # Mês
     df["mes"] = df["data"].dt.to_period("M").astype(str)
 
+    # ── Detecção de duplicatas ─────────────────────────────────────────────
+    # Linhas com mesmo id_pedido + sku + data podem ser duplicatas de exportação.
+    # Guarda contagem no session_state para exibir aviso na interface.
+    dup_cols = [c for c in ["id_pedido","sku","data"] if c in df.columns]
+    if len(dup_cols) >= 2:
+        n_dup = int(df.duplicated(subset=dup_cols).sum())
+        if n_dup > 0:
+            # Remove duplicatas mantendo a primeira ocorrência
+            df = df.drop_duplicates(subset=dup_cols, keep="first")
+            # Armazena aviso para exibição posterior
+            if "_avisos_carga" not in st.session_state:
+                st.session_state["_avisos_carga"] = []
+            st.session_state["_avisos_carga"].append(
+                f"⚠️ {n_dup} linha(s) duplicada(s) removidas automaticamente "
+                f"(mesmo id_pedido + sku + data)."
+            )
+
     return df
 
 # ─────────────────────────────────────────────
@@ -369,6 +389,31 @@ def verificar_alertas(df_atual, df_ant, cfg_alertas):
         var = calcular_variacao(m["receita"], m_ant["receita"])
         if var is not None and var < -limiar_queda:
             alertas.append(("🔴", f"Receita caiu <strong>{abs(var):.1f}%</strong> vs. período anterior — abaixo do limiar de -{limiar_queda}%."))
+
+    # Produto com queda abrupta de volume (>50% vs anterior)
+    if (not df_ant.empty and "produto" in df_atual.columns
+            and "quantidade_vendida" in df_atual.columns):
+        v_atual = df_atual.groupby("produto")["quantidade_vendida"].sum()
+        v_ant   = df_ant.groupby("produto")["quantidade_vendida"].sum()
+        comum   = v_atual.index.intersection(v_ant.index)
+        if len(comum) > 0:
+            quedas = ((v_atual[comum] - v_ant[comum]) / v_ant[comum].replace(0, np.nan) * 100)
+            pior = quedas[quedas < -50]
+            if not pior.empty:
+                prod_nome = pior.idxmin()
+                alertas.append(("🟡", f"Produto <strong>{prod_nome}</strong> com queda de "
+                                f"<strong>{abs(pior.min()):.0f}%</strong> no volume vs. período anterior."))
+
+    # Fontes com dados muito antigos (última data > 7 dias atrás)
+    hoje_ts = pd.Timestamp(datetime.today().date())
+    for marca, df_m in st.session_state.get("dfs", {}).items():
+        if df_m.empty or "data" not in df_m.columns:
+            continue
+        ultima = df_m["data"].max()
+        dias_atraso = (hoje_ts - ultima).days
+        if dias_atraso > 7:
+            alertas.append(("🟡", f"Fonte <strong>{marca}</strong>: último dado tem "
+                            f"<strong>{dias_atraso} dias</strong> — verifique a planilha."))
 
     return alertas
 
@@ -733,7 +778,12 @@ O dashboard consolida automaticamente, contando o pedido uma única vez e somand
 # ─────────────────────────────────────────────
 alertas = verificar_alertas(df_atual, df_ant, st.session_state.cfg_alertas)
 for emoji, msg in alertas:
-    st.markdown(f"<div class='alert-box'>{emoji} {msg}</div>", unsafe_allow_html=True)
+    cor_box = "alert-box" if emoji == "🔴" else "warn-box"
+    st.markdown(f"<div class='{cor_box}'>{emoji} {msg}</div>", unsafe_allow_html=True)
+
+# Avisos de carga (duplicatas removidas, etc.)
+for aviso in st.session_state.pop("_avisos_carga", []):
+    st.markdown(f"<div class='warn-box'>{aviso}</div>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # SELETOR DE PERÍODO inline
@@ -833,6 +883,29 @@ with tab_geral:
     m     = calcular_metricas_pedidos(df_atual)
     m_ant = calcular_metricas_pedidos(df_ant) if not df_ant.empty else {}
 
+    # ── Sparklines (tendência dos últimos 7 dias de receita) ──────────────
+    def sparkline_svg(serie: pd.Series, cor: str = "#4a7cff", width=64, height=24) -> str:
+        """Gera um SVG inline de sparkline a partir de uma série temporal."""
+        s = serie.fillna(0).values
+        if len(s) < 2 or s.max() == s.min():
+            return ""
+        xs = [int(i / (len(s)-1) * width) for i in range(len(s))]
+        mn, mx = s.min(), s.max()
+        ys = [int(height - (v - mn) / (mx - mn) * (height - 4) - 2) for v in s]
+        pts = " ".join(f"{x},{y}" for x, y in zip(xs, ys))
+        return (f'<svg width="{width}" height="{height}" style="vertical-align:middle">'
+                f'<polyline points="{pts}" fill="none" stroke="{cor}" stroke-width="1.5" '
+                f'stroke-linecap="round" stroke-linejoin="round"/></svg>')
+
+    spark_receita = ""
+    if "data" in df_atual.columns and "faturado" in df_atual.columns:
+        ultimos7 = (df_atual[df_atual["faturado"]]
+                    .groupby("data")["valor_total"].sum()
+                    .sort_index().tail(7))
+        if len(ultimos7) >= 2:
+            trend_cor = "#10b981" if ultimos7.iloc[-1] >= ultimos7.iloc[0] else "#f43f5e"
+            spark_receita = sparkline_svg(ultimos7, cor=trend_cor)
+
     st.markdown("### KPIs do Período")
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("💰 Receita",        f"R$ {m['receita']:,.0f}",
@@ -848,6 +921,15 @@ with tab_geral:
                   m_ant['faturados']/m_ant['pedidos']*100 if m_ant.get('pedidos') else 0)))
     k6.metric("🎟️ Ticket Médio",  f"R$ {m['ticket_medio']:,.0f}",
               delta=formatar_variacao(calcular_variacao(m['ticket_medio'], m_ant.get('ticket_medio',0))))
+
+    # Sparkline de tendência de receita (últimos 7 dias)
+    if spark_receita:
+        st.markdown(
+            f"<div style='font-size:.75rem;color:#6b7a99;margin-top:4px;display:flex;"
+            f"align-items:center;gap:8px;'>"
+            f"<span>Tendência receita (7d)</span>{spark_receita}</div>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -880,7 +962,7 @@ with tab_geral:
 
     st.markdown("---")
 
-    # Evolução receita — linhas spline
+    # Evolução receita — linhas spline + sobreposição YoY
     st.markdown("### Evolução de Receita por Marca")
     if "marca" in df_atual.columns:
         df_time = (df_atual[df_atual.get("faturado", pd.Series(True, index=df_atual.index))]
@@ -892,6 +974,33 @@ with tab_geral:
                 x=d["data"], y=d["valor_total"], name=marca, mode="lines",
                 line=dict(color=COR_MARCAS.get(marca,"#4a7cff"), width=2.5, shape="spline", smoothing=1.3),
             ))
+
+        # Sobreposição do mesmo período no ano anterior
+        try:
+            data_ini_yoy = data_inicio.replace(year=data_inicio.year - 1)
+            data_fim_yoy = data_fim.replace(year=data_fim.year - 1)
+        except ValueError:
+            data_ini_yoy = data_inicio - timedelta(days=365)
+            data_fim_yoy = data_fim   - timedelta(days=365)
+
+        df_yoy_frames = []
+        for marca in [m for m in MARCAS if m in st.session_state.dfs]:
+            df_yoy_m = filtrar_periodo(st.session_state.dfs[marca], data_ini_yoy, data_fim_yoy)
+            if not df_yoy_m.empty and "faturado" in df_yoy_m.columns:
+                df_yoy_m = df_yoy_m[df_yoy_m["faturado"]].copy()
+                df_yoy_m["data_ajustada"] = df_yoy_m["data"] + pd.DateOffset(years=1)
+                df_yoy_frames.append(df_yoy_m)
+
+        if df_yoy_frames:
+            df_yoy = pd.concat(df_yoy_frames, ignore_index=True)
+            df_yoy_agg = df_yoy.groupby("data_ajustada")["valor_total"].sum().reset_index()
+            fig_time.add_trace(go.Scatter(
+                x=df_yoy_agg["data_ajustada"], y=df_yoy_agg["valor_total"],
+                name="Ano anterior", mode="lines",
+                line=dict(color="#4a5568", width=1.5, dash="dot", shape="spline", smoothing=1.3),
+                opacity=0.6,
+            ))
+
         fig_time.update_layout(**layout_normal())
         st.plotly_chart(fig_time, use_container_width=True)
 
@@ -1010,7 +1119,7 @@ with tab_prod:
                 st.dataframe(pd.DataFrame(sorted(sem_venda), columns=["Produto"]),
                              use_container_width=True, hide_index=True)
 
-    # Tabela detalhada
+    # Tabela detalhada com ordenação clicável
     st.markdown("### Detalhamento por Produto")
     group_cols = ["marca","produto"] + (["sku"] if "sku" in df_prod.columns else [])
     resumo_prod = (
@@ -1021,13 +1130,29 @@ with tab_prod:
             pedidos      =("id_pedido","nunique"),
         )
         .reset_index()
-        .sort_values("receita_total", ascending=False)
     )
-    resumo_prod["ticket_medio"] = (resumo_prod["receita_total"] /
-                                   resumo_prod["pedidos"].replace(0, np.nan))
-    resumo_prod["receita_total"]= resumo_prod["receita_total"].map("R$ {:,.0f}".format)
-    resumo_prod["ticket_medio"] = resumo_prod["ticket_medio"].map(
+    resumo_prod["ticket_medio_num"] = (resumo_prod["receita_total"] /
+                                       resumo_prod["pedidos"].replace(0, np.nan))
+
+    # Controle de ordenação
+    col_ord, col_dir = st.columns([3, 1])
+    with col_ord:
+        ordem_col = st.selectbox(
+            "Ordenar por",
+            ["receita_total", "qtd_vendida", "pedidos", "ticket_medio_num"],
+            format_func=lambda x: {"receita_total":"Receita","qtd_vendida":"Qtd Vendida",
+                                   "pedidos":"Pedidos","ticket_medio_num":"Ticket Médio"}[x],
+            key="prod_ordem_col",
+        )
+    with col_dir:
+        ordem_asc = st.selectbox("Direção", ["↓ Maior", "↑ Menor"],
+                                 key="prod_ordem_dir") == "↑ Menor"
+
+    resumo_prod = resumo_prod.sort_values(ordem_col, ascending=ordem_asc)
+    resumo_prod["receita_total"]    = resumo_prod["receita_total"].map("R$ {:,.0f}".format)
+    resumo_prod["ticket_medio_num"] = resumo_prod["ticket_medio_num"].map(
         lambda x: f"R$ {x:,.0f}" if pd.notna(x) else "—")
+    resumo_prod = resumo_prod.rename(columns={"ticket_medio_num":"ticket_medio"})
 
     st.dataframe(resumo_prod, use_container_width=True, hide_index=True)
     csv_prod = resumo_prod.to_csv(index=False).encode("utf-8")
@@ -1326,6 +1451,26 @@ with tab_traf:
             "faturados":"Faturados","taxa_conv":"Taxa Conv.","receita":"Receita","var":"Var. vs Ant."})
         cols_c = [c for c in ["Tipo de Canal","Campanha","Pedidos","Faturados","Taxa Conv.","Receita","Var. vs Ant."]
                   if c in camp_exib.columns]
+
+        # Ordenação clicável
+        col_co, col_cd = st.columns([3, 1])
+        with col_co:
+            camp_ord = st.selectbox("Ordenar campanhas por",
+                                    [c for c in ["Receita","Pedidos","Faturados","Taxa Conv."] if c in camp_exib.columns],
+                                    key="camp_ord_col")
+        with col_cd:
+            camp_asc = st.selectbox("Direção", ["↓ Maior","↑ Menor"], key="camp_ord_dir") == "↑ Menor"
+        if camp_ord in camp_exib.columns:
+            try:
+                camp_exib = camp_exib.sort_values(
+                    camp_ord,
+                    ascending=camp_asc,
+                    key=lambda s: pd.to_numeric(s.str.replace(r"[R$\s%,.]","",regex=True)
+                                                 .str.replace(",",".",regex=False), errors="coerce")
+                )
+            except Exception:
+                pass
+
         st.dataframe(camp_exib[cols_c], use_container_width=True, hide_index=True)
         st.download_button("📥 Exportar campanhas",
                            data=camp_exib[cols_c].to_csv(index=False).encode("utf-8"),
@@ -1416,6 +1561,30 @@ with tab_marca_aba:
         csv_marca = df_ma.to_csv(index=False).encode("utf-8")
         st.download_button(f"📥 Exportar dados {marca_sel}", data=csv_marca,
                            file_name=f"{marca_sel.lower()}_periodo.csv", mime="text/csv")
+
+        # ── Métricas de clientes: LTV básico e recompra ───────────────────
+        st.markdown("---")
+        st.markdown("### Comportamento de Clientes")
+        if "id_pedido" in df_ma.columns and "faturado" in df_ma.columns:
+            df_fat_ma = df_ma[df_ma["faturado"]]
+            # LTV básico = receita média por pedido único faturado
+            receita_por_ped = (df_fat_ma.groupby("id_pedido")["valor_total"].sum())
+            ltv_basico = float(receita_por_ped.mean()) if len(receita_por_ped) > 0 else 0
+
+            # Recompra: pedidos com mais de 1 SKU distinto = pedido com variedade
+            # (proxy de engajamento, pois não temos id_cliente)
+            if "sku" in df_fat_ma.columns:
+                skus_por_pedido = df_fat_ma.groupby("id_pedido")["sku"].nunique()
+                pct_multi_sku = float((skus_por_pedido > 1).mean() * 100) if len(skus_por_pedido) > 0 else 0
+                ml1, ml2, ml3 = st.columns(3)
+                ml1.metric("💳 LTV médio (período)", f"R$ {ltv_basico:,.0f}")
+                ml2.metric("🛍️ Pedidos multi-SKU", f"{pct_multi_sku:.1f}%",
+                           help="Pedidos com mais de 1 SKU diferente — proxy de variedade de compra")
+                ml3.metric("📦 Pedidos faturados", f"{m_a['faturados']:,}")
+            else:
+                c1, c2 = st.columns(2)
+                c1.metric("💳 LTV médio (período)", f"R$ {ltv_basico:,.0f}")
+                c2.metric("📦 Pedidos faturados", f"{m_a['faturados']:,}")
     else:
         st.info("Selecione uma marca carregada.")
 
