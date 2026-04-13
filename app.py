@@ -107,28 +107,6 @@ def layout_invertido(**extra):
 
 @st.cache_resource
 def get_bq_client():
-    """
-    Cria cliente BigQuery autenticado via service account definida em st.secrets.
-
-    Configure em .streamlit/secrets.toml (local) ou Streamlit Cloud → Secrets:
-
-    [bigquery]
-    project = "seu-projeto-gcp"
-    dataset = "nome_do_dataset"
-    table   = "nome_da_tabela"
-
-    [gcp_service_account]
-    type = "service_account"
-    project_id = "seu-projeto-gcp"
-    private_key_id = "..."
-    private_key = "-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
-    client_email = "sa-dashboard@seu-projeto-gcp.iam.gserviceaccount.com"
-    client_id = "..."
-    auth_uri = "https://accounts.google.com/o/oauth2/auth"
-    token_uri = "https://oauth2.googleapis.com/token"
-    auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-    client_x509_cert_url = "..."
-    """
     try:
         from google.cloud import bigquery
         from google.oauth2 import service_account
