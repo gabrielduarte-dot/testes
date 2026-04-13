@@ -5,3 +5,4 @@ requests
 google-cloud-bigquery
 pyarrow
 google-auth
+db-dtypes
