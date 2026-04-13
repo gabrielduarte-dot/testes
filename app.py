@@ -113,7 +113,7 @@ def get_bq_client():
         from google.oauth2 import service_account
         credentials = service_account.Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
-            scopes=["https://www.googleapis.com/auth/bigquery.readonly"],
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
         return bigquery.Client(
             credentials=credentials,
