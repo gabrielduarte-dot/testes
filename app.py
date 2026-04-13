@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="Dashboard de Vendas · Grupo Seculus",
     page_icon="⌚",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ─────────────────────────────────────────────
@@ -46,6 +46,7 @@ hr{border-color:#2a2f3e!important;}
 .badge-vermelho{background:#2e0d14;color:#f43f5e;padding:2px 8px;border-radius:6px;font-size:.8rem;font-weight:600;}
 .badge-amarelo{background:#2e200d;color:#f59e0b;padding:2px 8px;border-radius:6px;font-size:.8rem;font-weight:600;}
 .bq-status{background:linear-gradient(135deg,#0d1e12 0%,#102016 100%);border:1px solid #1a4028;border-radius:10px;padding:12px 16px;margin:8px 0;font-size:.8rem;font-family:'DM Mono',monospace;}
+.filtro-inline{background:#161b27;border:1px solid #2a3350;border-radius:10px;padding:12px 16px;margin-bottom:16px;}
 [data-baseweb="tab-list"]{background-color:#161b27!important;border-bottom:1px solid #2a3350!important;gap:4px;}
 [data-baseweb="tab"]{color:#8896b3!important;font-weight:500!important;}
 [aria-selected="true"]{color:#fff!important;border-bottom:2px solid #4a7cff!important;}
@@ -56,10 +57,11 @@ hr{border-color:#2a2f3e!important;}
 # CONSTANTES
 # ─────────────────────────────────────────────
 COR_MARCAS = {
-    "Seculus":  "#4a7cff",
-    "Mondaine": "#f59e0b",
-    "Time":     "#10b981",
-    "E-time":   "#f43f5e",
+    "Seculus":  "#4a7cff",   # azul
+    "Mondaine": "#f59e0b",   # âmbar
+    "Timex":    "#10b981",   # verde
+    "E-time":   "#f43f5e",   # vermelho
+    "Time":     "#a78bfa",   # roxo (fallback legado)
 }
 
 CORES_CANAL = {
@@ -71,9 +73,8 @@ CORES_CANAL = {
     "Outros":              "#6b7a99",
 }
 
-# Valores aceitos para cada status
 STATUS_FATURADO  = {"faturado","entregue","concluído","concluido","aprovado",
-                    "complete","completed","paid","pago"}
+                    "complete","completed","paid","pago","invoiced"}
 STATUS_CANCELADO = {"cancelado","cancelada","devolvido","devolvida",
                     "canceled","cancelled","returned"}
 
@@ -102,7 +103,7 @@ def layout_invertido(**extra):
     return d
 
 # ─────────────────────────────────────────────
-# BIGQUERY — CONEXÃO E CARGA
+# BIGQUERY
 # ─────────────────────────────────────────────
 
 @st.cache_resource
@@ -110,10 +111,9 @@ def get_bq_client():
     try:
         from google.cloud import bigquery
         from google.oauth2 import service_account
-
         credentials = service_account.Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            scopes=["https://www.googleapis.com/auth/bigquery.readonly"],
         )
         return bigquery.Client(
             credentials=credentials,
@@ -127,22 +127,12 @@ def get_bq_client():
 @st.cache_data(ttl=300, show_spinner="Consultando BigQuery...")
 def carregar_dados_bq(data_inicio_str: str, data_fim_str: str) -> tuple[pd.DataFrame, str]:
     """
-    Carrega pedidos do BigQuery filtrando por período diretamente na query
-    (evita trazer toda a tabela para memória).
+    Consulta a view vw_vendas_dashboard (já filtrada: sem sites próprios, sem Livelo).
 
-    Schema esperado na tabela (nomes exatos ou ajuste a query abaixo):
-        id_pedido        STRING / INT64
-        data             DATE
-        marca            STRING
-        produto          STRING
-        sku              STRING
-        quantidade_vendida INT64
-        valor_unitario   FLOAT64
-        valor_total      FLOAT64
-        status_pedido    STRING
-        origem_cliente   STRING
-
-    Retorna (DataFrame preparado, timestamp da carga).
+    Schema da view unificada:
+        id_pedido, data, marca, sku, produto, quantidade_vendida,
+        valor_unitario, valor_total, status_pedido, origem_cliente,
+        campanha, marketing_tags, canal_origem ('ecommerce' | 'marketplace')
     """
     from google.cloud import bigquery
 
@@ -156,16 +146,19 @@ def carregar_dados_bq(data_inicio_str: str, data_fim_str: str) -> tuple[pd.DataF
 
     query = f"""
         SELECT
-            CAST(id_pedido AS STRING)   AS id_pedido,
+            CAST(id_pedido AS STRING)                AS id_pedido,
             data,
-            marca,
-            produto,
-            sku,
-            COALESCE(quantidade_vendida, 1)             AS quantidade_vendida,
-            COALESCE(valor_unitario, 0.0)               AS valor_unitario,
-            COALESCE(valor_total, 0.0)                  AS valor_total,
-            LOWER(TRIM(status_pedido))                  AS status_pedido,
-            origem_cliente
+            COALESCE(marca, 'Não identificado')      AS marca,
+            COALESCE(sku, '')                        AS sku,
+            COALESCE(produto, '')                    AS produto,
+            COALESCE(quantidade_vendida, 1)          AS quantidade_vendida,
+            COALESCE(valor_unitario, 0.0)            AS valor_unitario,
+            COALESCE(valor_total, 0.0)               AS valor_total,
+            LOWER(TRIM(status_pedido))               AS status_pedido,
+            COALESCE(origem_cliente, '')             AS origem_cliente,
+            COALESCE(campanha, '')                   AS campanha,
+            COALESCE(marketing_tags, '')             AS marketing_tags,
+            canal_origem
         FROM `{project}.{dataset}.{table}`
         WHERE data BETWEEN @data_inicio AND @data_fim
         ORDER BY data DESC
@@ -176,17 +169,13 @@ def carregar_dados_bq(data_inicio_str: str, data_fim_str: str) -> tuple[pd.DataF
             bigquery.ScalarQueryParameter("data_fim",    "DATE", data_fim_str),
         ]
     )
-
     try:
         df = client.query(query, job_config=job_config).to_dataframe()
         ts = datetime.now().strftime("%d/%m/%Y %H:%M")
-
         if df.empty:
             return df, ts
-
         df = preparar_df(df)
         return df, ts
-
     except Exception as e:
         st.error(f"❌ Erro na consulta BigQuery: {e}")
         return pd.DataFrame(), ""
@@ -198,75 +187,61 @@ def carregar_dados_bq(data_inicio_str: str, data_fim_str: str) -> tuple[pd.DataF
 
 def classificar_tipo_canal(origem: str) -> str:
     o = str(origem).lower().strip()
-    if any(w in o for w in ["google", "gads", "adwords", "cpc", "ppc", "search"]):
+    if any(w in o for w in ["google","gads","adwords","cpc","ppc","search"]):
         return "Google Ads"
-    if any(w in o for w in ["meta", "facebook", "instagram", "fb", "ig"]):
+    if any(w in o for w in ["meta","facebook","instagram","fb","ig"]):
         return "Meta Ads"
-    if any(w in o for w in ["orgânico", "organico", "organic", "seo", "direct", "direto"]):
+    if any(w in o for w in ["orgânico","organico","organic","seo","direct","direto"]):
         return "Orgânico"
-    if any(w in o for w in ["email", "e-mail", "newsletter"]):
+    if any(w in o for w in ["email","e-mail","newsletter"]):
         return "E-mail"
-    if any(w in o for w in ["influencer", "influenciador", "parceiro"]):
+    if any(w in o for w in ["influencer","influenciador","parceiro"]):
         return "Influencer/Parceiro"
     return "Outros"
 
 
 def preparar_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normaliza o DataFrame vindo do BigQuery:
-    - Garante tipos corretos (BQ já entrega tipado, mas cobre fallback)
-    - Cria colunas booleanas faturado / cancelado / pendente
-    - Recalcula valor_total quando zerado mas unitário e qtd existem
-    - Garante id_pedido como string
-    - Cria campanha, tipo_canal, canal e mes
-    """
     df = df.copy()
 
-    # Data — BQ retorna como date, converte para Timestamp para compatibilidade pandas
     df["data"] = pd.to_datetime(df["data"], errors="coerce")
     df.dropna(subset=["data"], inplace=True)
 
-    # Numéricos — garante float (BQ pode retornar Decimal em alguns drivers)
-    for col in ["valor_total", "quantidade_vendida", "valor_unitario"]:
+    for col in ["valor_total","quantidade_vendida","valor_unitario"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # Recalcula valor_total quando zerado
     if "valor_unitario" in df.columns and "quantidade_vendida" in df.columns:
         mask = (df["valor_total"] == 0) & (df["valor_unitario"] > 0)
-        df.loc[mask, "valor_total"] = (
-            df.loc[mask, "valor_unitario"] * df.loc[mask, "quantidade_vendida"]
-        )
+        df.loc[mask, "valor_total"] = df.loc[mask, "valor_unitario"] * df.loc[mask, "quantidade_vendida"]
 
-    # Status — normaliza e cria flags booleanas
     df["status_pedido"] = df["status_pedido"].astype(str).str.strip().str.lower()
     df["faturado"]  = df["status_pedido"].isin(STATUS_FATURADO)
     df["cancelado"] = df["status_pedido"].isin(STATUS_CANCELADO)
     df["pendente"]  = ~df["faturado"] & ~df["cancelado"]
 
-    # id_pedido como string limpa
     if "id_pedido" not in df.columns:
         df["id_pedido"] = df.index.astype(str)
     else:
         df["id_pedido"] = df["id_pedido"].astype(str).str.strip()
 
-    # Canal / campanha
     if "origem_cliente" in df.columns:
-        df["campanha"]   = df["origem_cliente"].astype(str).str.strip().str.title()
         df["tipo_canal"] = df["origem_cliente"].apply(classificar_tipo_canal)
         df["canal"]      = df["tipo_canal"]
     else:
-        df["campanha"]   = "Não informado"
         df["tipo_canal"] = "Outros"
         df["canal"]      = "Outros"
 
-    # Marca — garante que a coluna existe
+    if "campanha" in df.columns:
+        df["campanha"] = df["campanha"].astype(str).str.strip().str.title()
+        df["campanha"] = df["campanha"].replace("", "Não informado")
+
     if "marca" not in df.columns:
-        df["marca"] = "Não informado"
+        df["marca"] = "Não identificado"
 
-    # Mês para agrupamentos
+    if "canal_origem" not in df.columns:
+        df["canal_origem"] = "ecommerce"
+
     df["mes"] = df["data"].dt.to_period("M").astype(str)
-
     return df
 
 # ─────────────────────────────────────────────
@@ -281,47 +256,25 @@ def calcular_variacao(atual, anterior):
 def formatar_variacao(val):
     return f"{val:+.1f}%" if val is not None else None
 
-def filtrar_periodo(df: pd.DataFrame, d_ini, d_fim) -> pd.DataFrame:
-    if df.empty:
-        return df
-    return df[
-        (df["data"] >= pd.Timestamp(d_ini)) &
-        (df["data"] <= pd.Timestamp(d_fim) + pd.Timedelta(hours=23, minutes=59))
-    ]
-
 def calcular_periodo_anterior(inicio, fim, modo: str):
-    """
-    Retorna (inicio_ant, fim_ant) com duração idêntica ao período atual.
-    Correção do bug original: delta = fim - inicio já exclui 1 dia,
-    portanto somamos +1 para manter a mesma quantidade de dias.
-    """
-    n_dias = (fim - inicio).days  # duração em dias (inclusive)
-
+    n_dias = (fim - inicio).days
     if modo == "Período anterior equivalente":
-        fim_ant   = inicio - timedelta(days=1)
+        fim_ant    = inicio - timedelta(days=1)
         inicio_ant = fim_ant - timedelta(days=n_dias)
         return inicio_ant, fim_ant
-
     if modo == "Mês anterior":
         primeiro_atual = inicio.replace(day=1)
         fim_ant        = primeiro_atual - timedelta(days=1)
         inicio_ant     = fim_ant.replace(day=1)
         return inicio_ant, fim_ant
-
     if modo == "Mesmo período ano anterior":
         try:
             return inicio.replace(year=inicio.year - 1), fim.replace(year=fim.year - 1)
         except ValueError:
             return inicio - timedelta(days=365), fim - timedelta(days=365)
-
     return inicio, fim
 
 def badge_taxa(valor: float, limiar_bom: float = 5.0, limiar_medio: float = 15.0) -> str:
-    """
-    Verde  → taxa abaixo do limiar_bom
-    Amarelo → entre limiar_bom e limiar_medio
-    Vermelho → acima de limiar_medio
-    """
     if valor <= limiar_bom:
         return f"<span class='badge-verde'>{valor:.1f}%</span>"
     if valor <= limiar_medio:
@@ -330,89 +283,62 @@ def badge_taxa(valor: float, limiar_bom: float = 5.0, limiar_medio: float = 15.0
 
 def hex_to_rgba(hex_color: str, alpha: float = 0.1) -> str:
     h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{alpha})"
 
 def cor_marca(marca: str) -> str:
-    return COR_MARCAS.get(marca, "#4a7cff")
+    return COR_MARCAS.get(marca, "#6b7a99")
 
-# ─────────────────────────────────────────────
-# MÉTRICAS DE PEDIDOS
-# ─────────────────────────────────────────────
-
-def calcular_metricas_pedidos(df: pd.DataFrame) -> dict:
-    """
-    Calcula métricas consolidadas respeitando pedidos multi-SKU.
-
-    Regras:
-    • Pedidos únicos  = id_pedido.nunique()
-    • Status do pedido = hierarquia: faturado > pendente > cancelado
-      (se qualquer linha do pedido estiver faturada → pedido é faturado)
-    • Receita         = soma de valor_total das linhas de pedidos FATURADOS
-    • Itens           = soma de quantidade_vendida de TODAS as linhas
-    • Ticket médio    = média de receita_por_pedido entre pedidos faturados
-    """
-    _vazio = {
-        "pedidos": 0, "faturados": 0, "cancelados": 0, "pendentes": 0,
-        "itens": 0, "itens_fat": 0, "receita": 0.0, "ticket_medio": 0.0,
-    }
-    if df.empty:
-        return _vazio
-
-    # Garantia: as colunas booleanas devem existir (foram criadas em preparar_df)
-    if "faturado" not in df.columns or "cancelado" not in df.columns:
-        return _vazio
-
-    # Agrega por pedido — status mais avançado + receita total do pedido
-    agg = df.groupby("id_pedido", sort=False).agg(
-        tem_faturado  =("faturado",  "any"),
-        tem_cancelado =("cancelado", "any"),
-        receita_pedido=("valor_total", "sum"),
-    )
-
-    # Hierarquia de status por pedido
-    agg["status_ped"] = "pendente"
-    agg.loc[agg["tem_cancelado"] & ~agg["tem_faturado"], "status_ped"] = "cancelado"
-    agg.loc[agg["tem_faturado"], "status_ped"] = "faturado"
-
-    fat_mask = agg["status_ped"] == "faturado"
-
-    pedidos    = len(agg)
-    faturados  = int(fat_mask.sum())
-    cancelados = int((agg["status_ped"] == "cancelado").sum())
-    pendentes  = int((agg["status_ped"] == "pendente").sum())
-    receita    = float(agg.loc[fat_mask, "receita_pedido"].sum())
-    ticket     = float(agg.loc[fat_mask, "receita_pedido"].mean()) if faturados > 0 else 0.0
-
-    qtd_col = "quantidade_vendida" if "quantidade_vendida" in df.columns else None
-    itens     = int(df[qtd_col].sum()) if qtd_col else len(df)
-    itens_fat = int(df.loc[df["faturado"], qtd_col].sum()) if qtd_col else faturados
-
-    return {
-        "pedidos": pedidos, "faturados": faturados,
-        "cancelados": cancelados, "pendentes": pendentes,
-        "itens": itens, "itens_fat": itens_fat,
-        "receita": receita, "ticket_medio": ticket,
-    }
-
-# ─────────────────────────────────────────────
-# FILTROS / CONSOLIDAÇÃO
-# ─────────────────────────────────────────────
-
-def aplicar_filtros(df: pd.DataFrame, marcas_sel, canais_sel, campanhas_sel) -> pd.DataFrame:
-    """Aplica filtros de marca, canal e campanha a um DataFrame já recortado por período."""
+def aplicar_filtros(df: pd.DataFrame, marcas_sel, canais_sel, origens_sel) -> pd.DataFrame:
     if df.empty:
         return df
     if marcas_sel and "marca" in df.columns:
         df = df[df["marca"].isin(marcas_sel)]
     if canais_sel and "canal" in df.columns:
         df = df[df["canal"].isin(canais_sel)]
-    if campanhas_sel and "campanha" in df.columns:
-        df = df[df["campanha"].isin(campanhas_sel)]
+    if origens_sel and "canal_origem" in df.columns:
+        df = df[df["canal_origem"].isin(origens_sel)]
     return df
 
 # ─────────────────────────────────────────────
-# ALERTAS PROATIVOS
+# MÉTRICAS DE PEDIDOS
+# ─────────────────────────────────────────────
+
+def calcular_metricas_pedidos(df: pd.DataFrame) -> dict:
+    _vazio = {
+        "pedidos":0,"faturados":0,"cancelados":0,"pendentes":0,
+        "itens":0,"itens_fat":0,"receita":0.0,"ticket_medio":0.0,
+    }
+    if df.empty or "faturado" not in df.columns or "cancelado" not in df.columns:
+        return _vazio
+
+    agg = df.groupby("id_pedido", sort=False).agg(
+        tem_faturado  =("faturado",  "any"),
+        tem_cancelado =("cancelado", "any"),
+        receita_pedido=("valor_total","sum"),
+    )
+    agg["status_ped"] = "pendente"
+    agg.loc[agg["tem_cancelado"] & ~agg["tem_faturado"], "status_ped"] = "cancelado"
+    agg.loc[agg["tem_faturado"], "status_ped"] = "faturado"
+
+    fat_mask   = agg["status_ped"] == "faturado"
+    pedidos    = len(agg)
+    faturados  = int(fat_mask.sum())
+    cancelados = int((agg["status_ped"] == "cancelado").sum())
+    pendentes  = int((agg["status_ped"] == "pendente").sum())
+    receita    = float(agg.loc[fat_mask,"receita_pedido"].sum())
+    ticket     = float(agg.loc[fat_mask,"receita_pedido"].mean()) if faturados > 0 else 0.0
+    qtd_col    = "quantidade_vendida" if "quantidade_vendida" in df.columns else None
+    itens      = int(df[qtd_col].sum()) if qtd_col else len(df)
+    itens_fat  = int(df.loc[df["faturado"], qtd_col].sum()) if qtd_col else faturados
+
+    return {
+        "pedidos":pedidos,"faturados":faturados,"cancelados":cancelados,"pendentes":pendentes,
+        "itens":itens,"itens_fat":itens_fat,"receita":receita,"ticket_medio":ticket,
+    }
+
+# ─────────────────────────────────────────────
+# ALERTAS
 # ─────────────────────────────────────────────
 
 def verificar_alertas(df_atual: pd.DataFrame, df_ant: pd.DataFrame, cfg: dict) -> list:
@@ -426,26 +352,17 @@ def verificar_alertas(df_atual: pd.DataFrame, df_ant: pd.DataFrame, cfg: dict) -
     if m["pedidos"] > 0:
         taxa_canc = m["cancelados"] / m["pedidos"] * 100
         if taxa_canc > limiar_canc:
-            alertas.append(
-                ("🔴", f"Taxa de cancelamento em <strong>{taxa_canc:.1f}%</strong> "
-                       f"— acima do limiar configurado de {limiar_canc}%.")
-            )
+            alertas.append(("🔴", f"Taxa de cancelamento em <strong>{taxa_canc:.1f}%</strong> — acima do limiar de {limiar_canc}%."))
 
     if m_ant.get("receita", 0) > 0:
         var = calcular_variacao(m["receita"], m_ant["receita"])
         if var is not None and var < -limiar_queda:
-            alertas.append(
-                ("🔴", f"Receita caiu <strong>{abs(var):.1f}%</strong> vs. período anterior "
-                       f"— abaixo do limiar de -{limiar_queda}%.")
-            )
+            alertas.append(("🔴", f"Receita caiu <strong>{abs(var):.1f}%</strong> vs. período anterior — abaixo do limiar de -{limiar_queda}%."))
 
-    # Alerta de ticket médio caindo >15%
     if m_ant.get("ticket_medio", 0) > 0:
         var_tk = calcular_variacao(m["ticket_medio"], m_ant["ticket_medio"])
         if var_tk is not None and var_tk < -15:
-            alertas.append(
-                ("🟡", f"Ticket médio caiu <strong>{abs(var_tk):.1f}%</strong> vs. período anterior.")
-            )
+            alertas.append(("🟡", f"Ticket médio caiu <strong>{abs(var_tk):.1f}%</strong> vs. período anterior."))
 
     return alertas
 
@@ -457,157 +374,128 @@ def gerar_resumo_texto(df: pd.DataFrame, marcas: list, d_ini, d_fim) -> str:
     m = calcular_metricas_pedidos(df)
     top_prod = "—"
     if "produto" in df.columns and "quantidade_vendida" in df.columns:
-        top3 = (df.groupby("produto")["quantidade_vendida"]
-                .sum().nlargest(3).index.tolist())
-        top_prod = ", ".join(top3) if top3 else "—"
-
+        prod_validos = df[df["produto"].str.strip() != ""]
+        if not prod_validos.empty:
+            top3 = prod_validos.groupby("produto")["quantidade_vendida"].sum().nlargest(3).index.tolist()
+            top_prod = ", ".join(top3) if top3 else "—"
     melhor_canal = "—"
-    if "canal" in df.columns:
-        canal_receita = (df[df["faturado"]].groupby("canal")["valor_total"].sum()
-                         if "faturado" in df.columns else df.groupby("canal")["valor_total"].sum())
-        if not canal_receita.empty:
-            melhor_canal = canal_receita.idxmax()
-
+    if "canal" in df.columns and "faturado" in df.columns:
+        canal_r = df[df["faturado"]].groupby("canal")["valor_total"].sum()
+        if not canal_r.empty:
+            melhor_canal = canal_r.idxmax()
     taxa_fat = m["faturados"] / m["pedidos"] * 100 if m["pedidos"] > 0 else 0
-
     return (
         f"📊 Resumo de Vendas — {d_ini.strftime('%d/%m/%Y')} a {d_fim.strftime('%d/%m/%Y')}\n"
         f"Marcas: {', '.join(marcas) if marcas else 'Todas'}\n\n"
-        f"• Receita faturada:   R$ {m['receita']:>12,.2f}\n"
-        f"• Pedidos realizados: {m['pedidos']:>12,}\n"
-        f"• Pedidos faturados:  {m['faturados']:>12,}  |  Cancelados: {m['cancelados']:,}\n"
-        f"• Taxa de faturamento:{taxa_fat:>11.1f}%\n"
-        f"• Ticket médio:       R$ {m['ticket_medio']:>12,.2f}\n"
-        f"• Top produtos:       {top_prod}\n"
+        f"• Receita faturada:    R$ {m['receita']:>12,.2f}\n"
+        f"• Pedidos realizados:  {m['pedidos']:>12,}\n"
+        f"• Pedidos faturados:   {m['faturados']:>12,}  |  Cancelados: {m['cancelados']:,}\n"
+        f"• Taxa de faturamento: {taxa_fat:>11.1f}%\n"
+        f"• Ticket médio:        R$ {m['ticket_medio']:>12,.2f}\n"
+        f"• Top produtos:        {top_prod}\n"
         f"• Canal com maior receita: {melhor_canal}"
     )
 
 # ─────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────
-_defaults = {
-    "cfg_alertas": {"limiar_cancelamento": 10, "limiar_queda_receita": 20},
-    "bq_ts": "",           # timestamp da última carga
-    "bq_n_linhas": 0,      # linhas carregadas
-}
-for k, v in _defaults.items():
+for k, v in {
+    "cfg_alertas": {"limiar_cancelamento":10,"limiar_queda_receita":20},
+    "bq_ts": "",
+    "bq_n_linhas": 0,
+}.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════
 # HEADER
+# ═══════════════════════════════════════════════════
+st.markdown("## ⌚ Dashboard de Vendas · Grupo Seculus")
+st.markdown(
+    "<p style='color:#8896b3;margin-top:-10px;font-size:.9rem;'>"
+    "Análise comparativa de performance por marca e período · Fonte: BigQuery</p>",
+    unsafe_allow_html=True,
+)
+
 # ─────────────────────────────────────────────
-_, col_title, _ = st.columns([1, 6, 1])
-with col_title:
-    st.markdown("## ⌚ Dashboard de Vendas · Grupo Seculus")
-    st.markdown(
-        "<p style='color:#8896b3;margin-top:-10px;font-size:.9rem;'>"
-        "Análise comparativa de performance por marca e período · Fonte: BigQuery</p>",
-        unsafe_allow_html=True,
+# SELEÇÃO DE PERÍODO NO TOPO
+# ─────────────────────────────────────────────
+hoje = datetime.today().date()
+
+c1, c2, c3, c4, c5, c_de, c_ate, c_comp, c_ref = st.columns([1,1,1,1,1,2,2,3,1.4])
+with c1:
+    if st.button("Hoje", use_container_width=True, key="at_hoje"):
+        st.session_state["data_inicio"] = hoje
+        st.session_state["data_fim"]    = hoje
+with c2:
+    if st.button("7d",   use_container_width=True, key="at_7d"):
+        st.session_state["data_inicio"] = hoje - timedelta(days=7)
+        st.session_state["data_fim"]    = hoje
+with c3:
+    if st.button("30d",  use_container_width=True, key="at_30d"):
+        st.session_state["data_inicio"] = hoje - timedelta(days=30)
+        st.session_state["data_fim"]    = hoje
+with c4:
+    if st.button("Mês",  use_container_width=True, key="at_mes"):
+        st.session_state["data_inicio"] = hoje.replace(day=1)
+        st.session_state["data_fim"]    = hoje
+with c5:
+    if st.button("Ano",  use_container_width=True, key="at_ano"):
+        st.session_state["data_inicio"] = hoje.replace(month=1, day=1)
+        st.session_state["data_fim"]    = hoje
+
+default_ini = st.session_state.get("data_inicio", hoje - timedelta(days=30))
+default_fim = st.session_state.get("data_fim",    hoje)
+
+with c_de:
+    data_inicio = st.date_input("De",  value=default_ini, key="data_inicio")
+with c_ate:
+    data_fim    = st.date_input("Até", value=default_fim,  key="data_fim")
+with c_comp:
+    comparar_periodo = st.selectbox(
+        "Comparar com",
+        ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"],
+        index=0, key="comparar_periodo",
     )
+with c_ref:
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Atualizar", use_container_width=True, key="btn_refresh"):
+        carregar_dados_bq.clear()
+        st.rerun()
+
 st.markdown("---")
 
 # ─────────────────────────────────────────────
-# SIDEBAR
+# SIDEBAR — apenas alertas e status BQ
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Configurações")
     st.markdown("---")
-
-    # ── Status da conexão BQ ──────────────────
     try:
         _bq_cfg = st.secrets.get("bigquery", {})
-        _proj   = _bq_cfg.get("project", "—")
+        _proj   = _bq_cfg.get("project","—")
         _ds     = _bq_cfg.get("dataset", "—")
         _tb     = _bq_cfg.get("table",   "—")
         st.markdown(
             f"<div class='bq-status'>"
             f"<span style='color:#10b981;'>●</span> BigQuery configurado<br>"
-            f"<span style='color:#6b7a99;font-size:.72rem;'>"
-            f"{_proj} › {_ds} › {_tb}</span>"
-            f"</div>",
-            unsafe_allow_html=True,
+            f"<span style='color:#6b7a99;font-size:.72rem;'>{_proj} › {_ds} › {_tb}</span>"
+            f"</div>", unsafe_allow_html=True,
         )
     except Exception:
         st.markdown(
             "<div class='bq-status'>"
             "<span style='color:#f43f5e;'>●</span> BigQuery não configurado<br>"
-            "<span style='color:#6b7a99;font-size:.72rem;'>"
-            "Adicione as credenciais em .streamlit/secrets.toml</span>"
-            "</div>",
-            unsafe_allow_html=True,
+            "<span style='color:#6b7a99;font-size:.72rem;'>Adicione as credenciais em .streamlit/secrets.toml</span>"
+            "</div>", unsafe_allow_html=True,
         )
-
-    st.markdown("---")
-
-    # ── Período ──────────────────────────────
-    st.markdown("**📅 Período de Análise**")
-    hoje = datetime.today().date()
-
-    col_a1, col_a2, col_a3 = st.columns(3)
-    with col_a1:
-        if st.button("7d",  use_container_width=True, key="atalho_7d"):
-            st.session_state["data_inicio"] = hoje - timedelta(days=7)
-            st.session_state["data_fim"]    = hoje
-    with col_a2:
-        if st.button("30d", use_container_width=True, key="atalho_30d"):
-            st.session_state["data_inicio"] = hoje - timedelta(days=30)
-            st.session_state["data_fim"]    = hoje
-    with col_a3:
-        if st.button("Mês", use_container_width=True, key="atalho_mes"):
-            st.session_state["data_inicio"] = hoje.replace(day=1)
-            st.session_state["data_fim"]    = hoje
-
-    col_b1, col_b2 = st.columns(2)
-    with col_b1:
-        if st.button("Ano",  use_container_width=True, key="atalho_ano"):
-            st.session_state["data_inicio"] = hoje.replace(month=1, day=1)
-            st.session_state["data_fim"]    = hoje
-    with col_b2:
-        if st.button("Hoje", use_container_width=True, key="atalho_hoje"):
-            st.session_state["data_inicio"] = hoje
-            st.session_state["data_fim"]    = hoje
-
-    default_ini = st.session_state.get("data_inicio", hoje - timedelta(days=30))
-    default_fim = st.session_state.get("data_fim",    hoje)
-
-    data_inicio = st.date_input("De",  value=default_ini, key="data_inicio")
-    data_fim    = st.date_input("Até", value=default_fim,  key="data_fim")
-
-    comparar_periodo = st.selectbox(
-        "Comparar com",
-        ["Período anterior equivalente", "Mês anterior", "Mesmo período ano anterior"],
-        index=0,
-    )
-
-    st.markdown("---")
-
-    # ── Botão de atualização ─────────────────
-    if st.button("🔄 Atualizar dados", use_container_width=True, key="btn_refresh"):
-        carregar_dados_bq.clear()
-        st.rerun()
-
     if st.session_state.bq_ts:
         st.markdown(
-            f"<div style='font-size:.72rem;color:#6b7a99;text-align:center;margin-top:4px;'>"
-            f"Última carga: {st.session_state.bq_ts} · "
-            f"{st.session_state.bq_n_linhas:,} linhas</div>",
+            f"<div style='font-size:.72rem;color:#6b7a99;text-align:center;margin-top:8px;'>"
+            f"Última carga: {st.session_state.bq_ts}<br>{st.session_state.bq_n_linhas:,} linhas</div>",
             unsafe_allow_html=True,
         )
-
     st.markdown("---")
-
-    # ── Filtros (populados após carga) ───────
-    st.markdown("**🔍 Filtros**")
-    # Esses widgets são populados dinamicamente após a carga dos dados.
-    # Os placeholders são substituídos na seção de carga abaixo.
-    _marcas_placeholder   = st.empty()
-    _canais_placeholder   = st.empty()
-    _campanha_placeholder = st.empty()
-
-    st.markdown("---")
-
-    # ── Alertas ──────────────────────────────
     st.markdown("**🔔 Limiares de Alerta**")
     st.session_state.cfg_alertas["limiar_cancelamento"] = st.slider(
         "Cancelamento (%)", 1, 50,
@@ -621,27 +509,21 @@ with st.sidebar:
     )
 
 # ─────────────────────────────────────────────
-# CARGA DE DADOS — ambos os períodos via BQ
+# CARGA DE DADOS
 # ─────────────────────────────────────────────
-data_inicio_ant, data_fim_ant = calcular_periodo_anterior(
-    data_inicio, data_fim, comparar_periodo
-)
+data_inicio_ant, data_fim_ant = calcular_periodo_anterior(data_inicio, data_fim, comparar_periodo)
 
-# Carrega período atual
 df_raw_atual, ts_atual = carregar_dados_bq(
     data_inicio.strftime("%Y-%m-%d"),
     data_fim.strftime("%Y-%m-%d"),
 )
-
-# Carrega período anterior (para comparações — cache separado)
 df_raw_ant, _ = carregar_dados_bq(
     data_inicio_ant.strftime("%Y-%m-%d"),
     data_fim_ant.strftime("%Y-%m-%d"),
 )
 
-# Persiste metadados de carga no session_state
 if ts_atual:
-    st.session_state.bq_ts      = ts_atual
+    st.session_state.bq_ts       = ts_atual
     st.session_state.bq_n_linhas = len(df_raw_atual)
 
 # ─────────────────────────────────────────────
@@ -652,88 +534,43 @@ if df_raw_atual.empty:
     <div style='background:linear-gradient(135deg,#1a2035 0%,#161b27 100%);
     border:1px dashed #3a4560;border-radius:14px;padding:40px;text-align:center;margin:20px 0;'>
         <h2 style='color:#fff;margin:0 0 8px 0;'>Nenhum dado encontrado</h2>
-        <p style='color:#8896b3;margin:0 0 20px 0;'>
-            Verifique se as credenciais do BigQuery estão configuradas em
-            <code>.streamlit/secrets.toml</code> e se há dados no período selecionado.
-        </p>
-        <p style='color:#4a7cff;font-size:.85rem;font-family:monospace;'>
-            project · dataset · table · gcp_service_account
+        <p style='color:#8896b3;margin:0;'>
+            Verifique as credenciais do BigQuery em <code>.streamlit/secrets.toml</code>
+            e se há dados no período selecionado.
         </p>
     </div>
     """, unsafe_allow_html=True)
-
-    with st.expander("📋 Como configurar o secrets.toml"):
-        st.code("""
-# .streamlit/secrets.toml
-
-[bigquery]
-project = "seu-projeto-gcp"
-dataset = "nome_do_dataset"
-table   = "nome_da_tabela"
-
-[gcp_service_account]
-type                        = "service_account"
-project_id                  = "seu-projeto-gcp"
-private_key_id              = "abc123..."
-private_key                 = "-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
-client_email                = "sa-dashboard@seu-projeto-gcp.iam.gserviceaccount.com"
-client_id                   = "123456789"
-auth_uri                    = "https://accounts.google.com/o/oauth2/auth"
-token_uri                   = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url        = "https://www.googleapis.com/robot/v1/metadata/x509/..."
-        """, language="toml")
-
-    with st.expander("📋 Schema esperado na tabela BigQuery"):
-        st.markdown("""
-| Coluna | Tipo BQ | Obrigatória | Descrição |
-|---|---|:---:|---|
-| `id_pedido` | STRING / INT64 | ✅ | ID único do pedido (repete se multi-SKU) |
-| `data` | DATE | ✅ | Data do pedido |
-| `marca` | STRING | — | Nome da marca |
-| `produto` | STRING | — | Nome do produto |
-| `sku` | STRING | — | Código do SKU |
-| `quantidade_vendida` | INT64 | — | Quantidade do SKU nessa linha |
-| `valor_unitario` | FLOAT64 | — | Preço unitário do SKU |
-| `valor_total` | FLOAT64 | ✅ | Total da linha (qty × unit) |
-| `status_pedido` | STRING | ✅ | `faturado` / `pendente` / `cancelado` |
-| `origem_cliente` | STRING | — | Canal de aquisição (ex: `google ads`) |
-
-**Pedidos multi-SKU:** o mesmo `id_pedido` pode ter N linhas. O dashboard consolida automaticamente.
-        """)
     st.stop()
 
 # ─────────────────────────────────────────────
-# FILTROS DINÂMICOS (populados após carga)
+# FILTROS GLOBAIS INLINE
 # ─────────────────────────────────────────────
-marcas_disponiveis = sorted(df_raw_atual["marca"].dropna().unique().tolist()) if "marca" in df_raw_atual.columns else []
-tipos_canal_opcoes = ["Google Ads", "Meta Ads", "Orgânico", "E-mail", "Influencer/Parceiro", "Outros"]
-campanhas_disp     = sorted(df_raw_atual["campanha"].dropna().unique().tolist()) if "campanha" in df_raw_atual.columns else []
+marcas_disponiveis  = sorted(df_raw_atual["marca"].dropna().unique().tolist()) if "marca" in df_raw_atual.columns else []
+origens_disponiveis = sorted(df_raw_atual["canal_origem"].dropna().unique().tolist()) if "canal_origem" in df_raw_atual.columns else []
+tipos_canal_opcoes  = ["Google Ads","Meta Ads","Orgânico","E-mail","Influencer/Parceiro","Outros"]
 
-with _marcas_placeholder:
+st.markdown("<div class='filtro-inline'>", unsafe_allow_html=True)
+fc1, fc2, fc3 = st.columns([3,3,2])
+with fc1:
     marcas_selecionadas = st.multiselect(
-        "Marcas", marcas_disponiveis,
-        default=marcas_disponiveis, key="marcas_sel",
+        "🏷️ Marcas", marcas_disponiveis, default=marcas_disponiveis, key="marcas_sel"
     )
-
-with _canais_placeholder:
+with fc2:
     tipos_canal_sel = st.multiselect(
-        "Tipo de canal", tipos_canal_opcoes,
-        default=tipos_canal_opcoes, key="tipos_canal_sel",
+        "📡 Canal de aquisição", tipos_canal_opcoes, default=tipos_canal_opcoes, key="tipos_canal_sel"
     )
-
-with _campanha_placeholder:
-    campanhas_sel = (
-        st.multiselect("Campanhas", campanhas_disp, default=campanhas_disp, key="camp_sel")
-        if campanhas_disp else []
+with fc3:
+    origens_sel = st.multiselect(
+        "🛒 Origem dos dados", origens_disponiveis, default=origens_disponiveis, key="origens_sel"
     )
+st.markdown("</div>", unsafe_allow_html=True)
 
 # Aplica filtros
-df_atual = aplicar_filtros(df_raw_atual, marcas_selecionadas, tipos_canal_sel, campanhas_sel)
-df_ant   = aplicar_filtros(df_raw_ant,   marcas_selecionadas, tipos_canal_sel, campanhas_sel)
+df_atual = aplicar_filtros(df_raw_atual, marcas_selecionadas, tipos_canal_sel, origens_sel)
+df_ant   = aplicar_filtros(df_raw_ant,   marcas_selecionadas, tipos_canal_sel, origens_sel)
 
 # ─────────────────────────────────────────────
-# ALERTAS PROATIVOS
+# ALERTAS
 # ─────────────────────────────────────────────
 for emoji, msg in verificar_alertas(df_atual, df_ant, st.session_state.cfg_alertas):
     st.markdown(f"<div class='alert-box'>{emoji} {msg}</div>", unsafe_allow_html=True)
@@ -741,7 +578,7 @@ for emoji, msg in verificar_alertas(df_atual, df_ant, st.session_state.cfg_alert
 # ─────────────────────────────────────────────
 # BANNER DE PERÍODO
 # ─────────────────────────────────────────────
-col_p1, col_p2, col_p3 = st.columns([5, 1, 5])
+col_p1, col_p2, col_p3 = st.columns([5,1,5])
 with col_p1:
     st.markdown(
         f"<div style='background:#1a2035;border:1px solid #3a4560;border-radius:8px;"
@@ -752,8 +589,7 @@ with col_p1:
         unsafe_allow_html=True,
     )
 with col_p2:
-    st.markdown("<div style='text-align:center;color:#6b7a99;padding-top:10px;'>vs</div>",
-                unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;color:#6b7a99;padding-top:10px;'>vs</div>", unsafe_allow_html=True)
 with col_p3:
     st.markdown(
         f"<div style='background:#1a2035;border:1px solid #3a4560;border-radius:8px;"
@@ -767,54 +603,53 @@ with col_p3:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# RESUMO POR MARCA (cards — usa dados já filtrados por período)
+# RESUMO POR MARCA (cards com borda colorida por marca)
 # ─────────────────────────────────────────────
-if marcas_disponiveis:
-    marcas_com_dados = [
-        m for m in marcas_disponiveis
-        if not df_atual[df_atual["marca"] == m].empty
-    ] if "marca" in df_atual.columns else []
+marcas_com_dados = (
+    [m for m in marcas_disponiveis if not df_atual[df_atual["marca"] == m].empty]
+    if "marca" in df_atual.columns else []
+)
 
-    if marcas_com_dados:
-        st.markdown("### Resumo por Marca")
-        cols_res = st.columns(len(marcas_com_dados))
-        for idx, marca in enumerate(marcas_com_dados):
-            df_m = df_atual[df_atual["marca"] == marca]
-            m_res = calcular_metricas_pedidos(df_m)
-            taxa_canc = (m_res["cancelados"] / m_res["pedidos"] * 100) if m_res["pedidos"] > 0 else 0
-            limiar_bom = st.session_state.cfg_alertas.get("limiar_cancelamento", 10) / 2
-            limiar_med = st.session_state.cfg_alertas.get("limiar_cancelamento", 10)
-            cor = cor_marca(marca)
-            with cols_res[idx]:
-                st.markdown(f"""
-                <div class="resumo-card">
-                    <h4 style='color:{cor};'>{marca}</h4>
-                    <div class="resumo-linha">
-                        <span>Pedidos únicos</span>
-                        <span class="resumo-valor">{m_res['pedidos']:,}</span>
-                    </div>
-                    <div class="resumo-linha">
-                        <span>Itens faturados</span>
-                        <span class="resumo-valor"><span class='badge-verde'>{m_res['itens_fat']:,}</span></span>
-                    </div>
-                    <div class="resumo-linha">
-                        <span>Cancelados</span>
-                        <span class="resumo-valor"><span class='badge-vermelho'>{m_res['cancelados']:,}</span></span>
-                    </div>
-                    <div class="resumo-linha">
-                        <span>Taxa cancelamento</span>
-                        <span class="resumo-valor">{badge_taxa(taxa_canc, limiar_bom, limiar_med)}</span>
-                    </div>
-                    <div class="resumo-linha">
-                        <span>Receita faturada</span>
-                        <span class="resumo-valor">R$ {m_res['receita']:,.0f}</span>
-                    </div>
-                    <div class="resumo-linha">
-                        <span>Ticket médio</span>
-                        <span class="resumo-valor">R$ {m_res['ticket_medio']:,.0f}</span>
-                    </div>
+if marcas_com_dados:
+    st.markdown("### Resumo por Marca")
+    cols_res = st.columns(len(marcas_com_dados))
+    for idx, marca in enumerate(marcas_com_dados):
+        df_m  = df_atual[df_atual["marca"] == marca]
+        m_res = calcular_metricas_pedidos(df_m)
+        taxa_canc  = (m_res["cancelados"] / m_res["pedidos"] * 100) if m_res["pedidos"] > 0 else 0
+        limiar_bom = st.session_state.cfg_alertas.get("limiar_cancelamento", 10) / 2
+        limiar_med = st.session_state.cfg_alertas.get("limiar_cancelamento", 10)
+        cor = cor_marca(marca)
+        with cols_res[idx]:
+            st.markdown(f"""
+            <div class="resumo-card" style="border-top:3px solid {cor};">
+                <h4 style='color:{cor};'>{marca}</h4>
+                <div class="resumo-linha">
+                    <span>Pedidos únicos</span>
+                    <span class="resumo-valor">{m_res['pedidos']:,}</span>
                 </div>
-                """, unsafe_allow_html=True)
+                <div class="resumo-linha">
+                    <span>Itens faturados</span>
+                    <span class="resumo-valor"><span class='badge-verde'>{m_res['itens_fat']:,}</span></span>
+                </div>
+                <div class="resumo-linha">
+                    <span>Cancelados</span>
+                    <span class="resumo-valor"><span class='badge-vermelho'>{m_res['cancelados']:,}</span></span>
+                </div>
+                <div class="resumo-linha">
+                    <span>Taxa cancelamento</span>
+                    <span class="resumo-valor">{badge_taxa(taxa_canc, limiar_bom, limiar_med)}</span>
+                </div>
+                <div class="resumo-linha">
+                    <span>Receita faturada</span>
+                    <span class="resumo-valor">R$ {m_res['receita']:,.0f}</span>
+                </div>
+                <div class="resumo-linha">
+                    <span>Ticket médio</span>
+                    <span class="resumo-valor">R$ {m_res['ticket_medio']:,.0f}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -822,8 +657,8 @@ st.markdown("---")
 # ABAS
 # ─────────────────────────────────────────────
 tab_geral, tab_prod, tab_ped, tab_conv, tab_traf, tab_marca_aba = st.tabs([
-    "📊 Visão Geral", "🏆 Produtos", "📦 Pedidos",
-    "🎯 Conversão", "📡 Tráfego & Origem", "🏷️ Por Marca",
+    "📊 Visão Geral","🏆 Produtos","📦 Pedidos",
+    "🎯 Conversão","📡 Tráfego & Origem","🏷️ Por Marca",
 ])
 
 # ═══════════════════════════════════════════════════
@@ -836,31 +671,27 @@ with tab_geral:
         m     = calcular_metricas_pedidos(df_atual)
         m_ant = calcular_metricas_pedidos(df_ant) if not df_ant.empty else {}
 
-        # ── KPIs ─────────────────────────────────────
         st.markdown("### KPIs do Período")
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
-
+        k1,k2,k3,k4,k5,k6 = st.columns(6)
         taxa_fat_atual = m["faturados"] / m["pedidos"] * 100 if m["pedidos"] else 0
         taxa_fat_ant   = m_ant["faturados"] / m_ant["pedidos"] * 100 if m_ant.get("pedidos") else 0
 
         k1.metric("💰 Receita",       f"R$ {m['receita']:,.0f}",
-                  delta=formatar_variacao(calcular_variacao(m["receita"],       m_ant.get("receita", 0))))
+                  delta=formatar_variacao(calcular_variacao(m["receita"],      m_ant.get("receita",0))))
         k2.metric("🛒 Pedidos",       f"{m['pedidos']:,}",
-                  delta=formatar_variacao(calcular_variacao(m["pedidos"],       m_ant.get("pedidos", 0))))
+                  delta=formatar_variacao(calcular_variacao(m["pedidos"],      m_ant.get("pedidos",0))))
         k3.metric("✅ Faturados",     f"{m['faturados']:,}",
-                  delta=formatar_variacao(calcular_variacao(m["faturados"],     m_ant.get("faturados", 0))))
+                  delta=formatar_variacao(calcular_variacao(m["faturados"],    m_ant.get("faturados",0))))
         k4.metric("❌ Cancelados",    f"{m['cancelados']:,}")
         k5.metric("📊 Taxa Fat.",     f"{taxa_fat_atual:.1f}%",
                   delta=formatar_variacao(calcular_variacao(taxa_fat_atual, taxa_fat_ant)))
         k6.metric("🎟️ Ticket Médio", f"R$ {m['ticket_medio']:,.0f}",
-                  delta=formatar_variacao(calcular_variacao(m["ticket_medio"],  m_ant.get("ticket_medio", 0))))
+                  delta=formatar_variacao(calcular_variacao(m["ticket_medio"], m_ant.get("ticket_medio",0))))
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Insights automáticos ─────────────────────
         insights = []
-
-        if m_ant.get("receita", 0) > 0:
+        if m_ant.get("receita",0) > 0:
             var = calcular_variacao(m["receita"], m_ant["receita"])
             emoji   = "🟢" if var >= 0 else "🔴"
             direcao = "crescimento" if var >= 0 else "queda"
@@ -868,10 +699,8 @@ with tab_geral:
                 f"{emoji} <strong>Receita:</strong> {direcao} de <strong>{abs(var):.1f}%</strong> "
                 f"vs. período anterior — de R$ {m_ant['receita']:,.0f} para R$ {m['receita']:,.0f}."
             )
-
-        # Concentração 80/20
-        if "produto" in df_atual.columns and "valor_total" in df_atual.columns:
-            df_fat = df_atual[df_atual["faturado"]]
+        if "produto" in df_atual.columns:
+            df_fat = df_atual[df_atual["faturado"] & (df_atual["produto"].str.strip() != "")]
             receita_prod = df_fat.groupby("produto")["valor_total"].sum().sort_values(ascending=False)
             total_r = receita_prod.sum()
             if total_r > 0:
@@ -879,32 +708,26 @@ with tab_geral:
                 n_prod_80 = int((cumsum <= 0.8).sum()) + 1
                 pct_prod  = n_prod_80 / len(receita_prod) * 100
                 insights.append(
-                    f"📐 <strong>Concentração 80/20:</strong> os <strong>{n_prod_80} produtos "
+                    f"📐 <strong>Concentração 80/20:</strong> <strong>{n_prod_80} produtos "
                     f"({pct_prod:.0f}% do catálogo)</strong> respondem por 80% da receita faturada."
                 )
-
-        # Canal dominante
         if "canal" in df_atual.columns:
             canal_r = df_atual[df_atual["faturado"]].groupby("canal")["valor_total"].sum()
             if not canal_r.empty:
                 top_canal = canal_r.idxmax()
                 pct_canal = canal_r[top_canal] / canal_r.sum() * 100
                 insights.append(
-                    f"📡 <strong>Canal dominante: {top_canal}</strong> — "
-                    f"{pct_canal:.0f}% da receita faturada no período."
+                    f"📡 <strong>Canal dominante: {top_canal}</strong> — {pct_canal:.0f}% da receita faturada."
                 )
-
-        for insight in insights:
-            st.markdown(f"<div class='insight-box'>{insight}</div>", unsafe_allow_html=True)
+        for ins in insights:
+            st.markdown(f"<div class='insight-box'>{ins}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
 
-        # ── Evolução de receita faturada por marca ───
         st.markdown("### Evolução de Receita Faturada por Marca")
         if "marca" in df_atual.columns:
             df_time = (df_atual[df_atual["faturado"]]
-                       .groupby(["data", "marca"])["valor_total"]
-                       .sum().reset_index())
+                       .groupby(["data","marca"])["valor_total"].sum().reset_index())
             fig_time = go.Figure()
             for marca in df_time["marca"].unique():
                 d = df_time[df_time["marca"] == marca].sort_values("data")
@@ -912,29 +735,25 @@ with tab_geral:
                     x=d["data"], y=d["valor_total"], name=marca, mode="lines",
                     line=dict(color=cor_marca(marca), width=2.5, shape="spline", smoothing=1.3),
                 ))
-            fig_time.update_layout(**layout_normal(
-                title="Receita diária faturada (R$)"
-            ))
+            fig_time.update_layout(**layout_normal(title="Receita diária faturada (R$)"))
             st.plotly_chart(fig_time, use_container_width=True)
 
         st.markdown("---")
         col_g1, col_g2 = st.columns(2)
-
         with col_g1:
             st.markdown("### Receita por Marca — Atual vs Anterior")
             if "marca" in df_atual.columns:
                 ra = df_atual[df_atual["faturado"]].groupby("marca")["valor_total"].sum().reset_index()
                 rp = (df_ant[df_ant["faturado"]].groupby("marca")["valor_total"].sum().reset_index()
                       if not df_ant.empty else pd.DataFrame(columns=["marca","valor_total"]))
-                ra.columns = ["marca", "atual"]
-                rp.columns = ["marca", "anterior"]
+                ra.columns = ["marca","atual"]
+                rp.columns = ["marca","anterior"]
                 comp = ra.merge(rp, on="marca", how="outer").fillna(0).sort_values("atual", ascending=False)
                 fig_comp = go.Figure([
                     go.Bar(name="Anterior", x=comp["marca"], y=comp["anterior"],
                            marker_color="rgba(100,120,160,0.4)", marker_line_width=0),
                     go.Bar(name="Atual",    x=comp["marca"], y=comp["atual"],
-                           marker_color=[cor_marca(m) for m in comp["marca"]],
-                           marker_line_width=0),
+                           marker_color=[cor_marca(m) for m in comp["marca"]], marker_line_width=0),
                 ])
                 fig_comp.update_layout(barmode="group", **layout_normal())
                 st.plotly_chart(fig_comp, use_container_width=True)
@@ -949,30 +768,27 @@ with tab_geral:
                 fig_pie.update_layout(**layout_normal())
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-        # Volume mensal de itens por marca
         st.markdown("### Volume Mensal de Itens Faturados por Marca")
         if "marca" in df_atual.columns and "quantidade_vendida" in df_atual.columns:
             df_men = (df_atual[df_atual["faturado"]]
-                      .groupby(["mes", "marca"])["quantidade_vendida"]
-                      .sum().reset_index())
+                      .groupby(["mes","marca"])["quantidade_vendida"].sum().reset_index())
             fig_men = px.bar(df_men, x="mes", y="quantidade_vendida", color="marca",
                              barmode="group", color_discrete_map=COR_MARCAS,
-                             labels={"quantidade_vendida": "Itens", "mes": "", "marca": "Marca"})
+                             labels={"quantidade_vendida":"Itens","mes":"","marca":"Marca"})
             fig_men.update_layout(**layout_normal())
             st.plotly_chart(fig_men, use_container_width=True)
 
-        # ── Exportação ───────────────────────────────
         st.markdown("---")
         st.markdown("### Exportar")
         c_exp1, c_exp2 = st.columns(2)
         with c_exp1:
-            resumo_txt = gerar_resumo_texto(df_atual, marcas_selecionadas, data_inicio, data_fim)
-            st.download_button("📋 Baixar resumo em texto", data=resumo_txt,
+            st.download_button("📋 Baixar resumo em texto",
+                               data=gerar_resumo_texto(df_atual, marcas_selecionadas, data_inicio, data_fim),
                                file_name="resumo_vendas.txt", mime="text/plain",
                                use_container_width=True)
         with c_exp2:
-            csv_export = df_atual.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Exportar dados filtrados (CSV)", data=csv_export,
+            st.download_button("📥 Exportar dados filtrados (CSV)",
+                               data=df_atual.to_csv(index=False).encode("utf-8"),
                                file_name="dados_filtrados.csv", mime="text/csv",
                                use_container_width=True)
 
@@ -983,82 +799,86 @@ with tab_geral:
 with tab_prod:
     st.markdown("### 🏆 Produtos")
 
-    if df_atual.empty or "produto" not in df_atual.columns:
-        st.info("Nenhum dado de produto disponível no período.")
+    if df_atual.empty:
+        st.info("Nenhum dado no período.")
     else:
-        c_fm, c_fn = st.columns([3, 1])
-        with c_fm:
+        # Filtro de marca e top N inline
+        cf1, cf2, _ = st.columns([3,1,4])
+        with cf1:
             marcas_prod = st.multiselect(
-                "Marca", marcas_selecionadas, default=marcas_selecionadas, key="prod_marcas"
+                "🏷️ Marca", marcas_selecionadas, default=marcas_selecionadas, key="prod_marcas"
             )
-        with c_fn:
-            top_n = st.selectbox("Top N", [5, 10, 15, 20], index=1, key="top_n")
+        with cf2:
+            top_n = st.selectbox("Top N", [5,10,15,20], index=1, key="top_n")
 
-        df_prod = df_atual[df_atual["marca"].isin(marcas_prod)] if "marca" in df_atual.columns else df_atual
+        df_prod = (df_atual[df_atual["marca"].isin(marcas_prod)]
+                   if "marca" in df_atual.columns else df_atual)
         df_prod_fat = df_prod[df_prod["faturado"]]
 
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            st.markdown("**Por quantidade faturada**")
-            if "quantidade_vendida" in df_prod_fat.columns:
-                top_qtd = (df_prod_fat.groupby(["marca", "produto"])["quantidade_vendida"]
-                           .sum().reset_index()
-                           .sort_values("quantidade_vendida", ascending=False).head(top_n))
-                fig_qtd = px.bar(top_qtd, x="quantidade_vendida", y="produto", color="marca",
-                                 orientation="h", color_discrete_map=COR_MARCAS,
-                                 labels={"quantidade_vendida": "Unidades", "produto": ""})
-                fig_qtd.update_layout(**layout_invertido())
-                st.plotly_chart(fig_qtd, use_container_width=True)
+        # Produtos só existem no ecommerce
+        tem_produto = (
+            "produto" in df_prod_fat.columns
+            and df_prod_fat["produto"].str.strip().ne("").any()
+        )
 
-        with col_p2:
-            st.markdown("**Por receita faturada**")
-            top_rec = (df_prod_fat.groupby(["marca", "produto"])["valor_total"]
-                       .sum().reset_index()
-                       .sort_values("valor_total", ascending=False).head(top_n))
-            fig_rec = px.bar(top_rec, x="valor_total", y="produto", color="marca",
-                             orientation="h", color_discrete_map=COR_MARCAS,
-                             labels={"valor_total": "Receita (R$)", "produto": ""})
-            fig_rec.update_layout(**layout_invertido())
-            st.plotly_chart(fig_rec, use_container_width=True)
-
-        # Produtos sem venda no período
-        todos_prod   = set(df_raw_atual["produto"].dropna().unique()) if "produto" in df_raw_atual.columns else set()
-        prod_c_venda = set(df_prod_fat["produto"].dropna().unique())
-        sem_venda    = todos_prod - prod_c_venda
-        if sem_venda:
+        if not tem_produto:
             st.markdown(
-                f"<div class='warn-box'>⚠️ <strong>{len(sem_venda)} produto(s) sem venda faturada</strong> "
-                f"no período selecionado.</div>",
+                "<div class='warn-box'>⚠️ Os dados de <strong>produto</strong> vêm exclusivamente "
+                "do canal <strong>ecommerce</strong>. Verifique se a coluna <code>produto</code> está "
+                "preenchida na tabela e se a origem <em>ecommerce</em> está selecionada nos filtros globais.</div>",
                 unsafe_allow_html=True,
             )
-            with st.expander(f"Ver {len(sem_venda)} produtos sem venda"):
-                st.dataframe(pd.DataFrame(sorted(sem_venda), columns=["Produto"]),
-                             use_container_width=True, hide_index=True)
+        else:
+            df_prod_fat_p = df_prod_fat[df_prod_fat["produto"].str.strip() != ""]
 
-        # Tabela detalhada
-        st.markdown("### Detalhamento por Produto")
-        group_cols = ["marca", "produto"] + (["sku"] if "sku" in df_prod_fat.columns else [])
-        resumo_prod = (
-            df_prod_fat.groupby(group_cols)
-            .agg(
-                qtd_vendida   =("quantidade_vendida", "sum") if "quantidade_vendida" in df_prod_fat.columns else ("valor_total", "count"),
-                receita_total =("valor_total", "sum"),
-                pedidos       =("id_pedido", "nunique"),
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                st.markdown("**Por quantidade faturada**")
+                if "quantidade_vendida" in df_prod_fat_p.columns:
+                    top_qtd = (df_prod_fat_p.groupby(["marca","produto"])["quantidade_vendida"]
+                               .sum().reset_index()
+                               .sort_values("quantidade_vendida", ascending=False).head(top_n))
+                    fig_qtd = px.bar(top_qtd, x="quantidade_vendida", y="produto", color="marca",
+                                     orientation="h", color_discrete_map=COR_MARCAS,
+                                     labels={"quantidade_vendida":"Unidades","produto":""})
+                    fig_qtd.update_layout(**layout_invertido())
+                    st.plotly_chart(fig_qtd, use_container_width=True)
+
+            with col_p2:
+                st.markdown("**Por receita faturada**")
+                top_rec = (df_prod_fat_p.groupby(["marca","produto"])["valor_total"]
+                           .sum().reset_index()
+                           .sort_values("valor_total", ascending=False).head(top_n))
+                fig_rec = px.bar(top_rec, x="valor_total", y="produto", color="marca",
+                                 orientation="h", color_discrete_map=COR_MARCAS,
+                                 labels={"valor_total":"Receita (R$)","produto":""})
+                fig_rec.update_layout(**layout_invertido())
+                st.plotly_chart(fig_rec, use_container_width=True)
+
+            st.markdown("### Detalhamento por Produto")
+            group_cols = ["marca","produto"] + (
+                ["sku"] if "sku" in df_prod_fat_p.columns
+                and df_prod_fat_p["sku"].str.strip().ne("").any() else []
             )
-            .reset_index()
-            .sort_values("receita_total", ascending=False)
-        )
-        resumo_prod["ticket_medio"] = (
-            resumo_prod["receita_total"] / resumo_prod["pedidos"].replace(0, np.nan)
-        )
-        resumo_prod["receita_total"] = resumo_prod["receita_total"].map("R$ {:,.2f}".format)
-        resumo_prod["ticket_medio"]  = resumo_prod["ticket_medio"].map(
-            lambda x: f"R$ {x:,.2f}" if pd.notna(x) else "—"
-        )
-        st.dataframe(resumo_prod, use_container_width=True, hide_index=True)
-        st.download_button("📥 Exportar tabela",
-                           data=resumo_prod.to_csv(index=False).encode("utf-8"),
-                           file_name="produtos.csv", mime="text/csv")
+            resumo_prod = (
+                df_prod_fat_p.groupby(group_cols)
+                .agg(qtd_vendida=("quantidade_vendida","sum"),
+                     receita_total=("valor_total","sum"),
+                     pedidos=("id_pedido","nunique"))
+                .reset_index()
+                .sort_values("receita_total", ascending=False)
+            )
+            resumo_prod["ticket_medio"] = (
+                resumo_prod["receita_total"] / resumo_prod["pedidos"].replace(0, np.nan)
+            )
+            resumo_prod["receita_total"] = resumo_prod["receita_total"].map("R$ {:,.2f}".format)
+            resumo_prod["ticket_medio"]  = resumo_prod["ticket_medio"].map(
+                lambda x: f"R$ {x:,.2f}" if pd.notna(x) else "—"
+            )
+            st.dataframe(resumo_prod, use_container_width=True, hide_index=True)
+            st.download_button("📥 Exportar tabela",
+                               data=resumo_prod.to_csv(index=False).encode("utf-8"),
+                               file_name="produtos.csv", mime="text/csv")
 
 
 # ═══════════════════════════════════════════════════
@@ -1076,11 +896,11 @@ with tab_ped:
         taxa_fat_ped = m["faturados"] / m["pedidos"] * 100 if m["pedidos"] else 0
         taxa_ant_ped = m_ant["faturados"] / m_ant["pedidos"] * 100 if m_ant.get("pedidos") else 0
 
-        kp1, kp2, kp3, kp4, kp5 = st.columns(5)
+        kp1,kp2,kp3,kp4,kp5 = st.columns(5)
         kp1.metric("📥 Realizados", f"{m['pedidos']:,}",
-                   delta=formatar_variacao(calcular_variacao(m["pedidos"],   m_ant.get("pedidos", 0))))
+                   delta=formatar_variacao(calcular_variacao(m["pedidos"],   m_ant.get("pedidos",0))))
         kp2.metric("✅ Faturados",  f"{m['faturados']:,}",
-                   delta=formatar_variacao(calcular_variacao(m["faturados"], m_ant.get("faturados", 0))))
+                   delta=formatar_variacao(calcular_variacao(m["faturados"], m_ant.get("faturados",0))))
         kp3.metric("⏳ Pendentes",  f"{m['pendentes']:,}")
         kp4.metric("❌ Cancelados", f"{m['cancelados']:,}")
         kp5.metric("📈 Taxa Fat.",  f"{taxa_fat_ped:.1f}%",
@@ -1088,7 +908,6 @@ with tab_ped:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Agrega status por pedido (não por linha) — correto para o gráfico de pizza
         ped_agg = (df_atual.groupby("id_pedido", sort=False)
                    .agg(tem_faturado=("faturado","any"), tem_cancelado=("cancelado","any"))
                    .reset_index())
@@ -1100,8 +919,8 @@ with tab_ped:
         with col_s1:
             st.markdown("### Status dos Pedidos")
             sc = ped_agg["status"].value_counts().reset_index()
-            sc.columns = ["status", "qtd"]
-            CORES_STATUS = {"Faturado": "#10b981", "Pendente": "#f59e0b", "Cancelado": "#f43f5e"}
+            sc.columns = ["status","qtd"]
+            CORES_STATUS = {"Faturado":"#10b981","Pendente":"#f59e0b","Cancelado":"#f43f5e"}
             fig_st = px.pie(sc, names="status", values="qtd",
                             color="status", color_discrete_map=CORES_STATUS, hole=0.55)
             fig_st.update_traces(textinfo="percent+label")
@@ -1111,10 +930,10 @@ with tab_ped:
         with col_s2:
             st.markdown("### Pedidos por Marca")
             if "marca" in df_atual.columns:
-                pm = (df_atual.groupby(["id_pedido", "marca"])
-                      .agg(faturado=("faturado", "any")).reset_index()
+                pm = (df_atual.groupby(["id_pedido","marca"])
+                      .agg(faturado=("faturado","any")).reset_index()
                       .groupby("marca")
-                      .agg(realizados=("id_pedido", "nunique"), faturados=("faturado", "sum"))
+                      .agg(realizados=("id_pedido","nunique"), faturados=("faturado","sum"))
                       .reset_index())
                 fig_pm = go.Figure([
                     go.Bar(name="Realizados", x=pm["marca"], y=pm["realizados"],
@@ -1125,32 +944,29 @@ with tab_ped:
                 fig_pm.update_layout(barmode="group", **layout_normal())
                 st.plotly_chart(fig_pm, use_container_width=True)
 
-        # Funil
         st.markdown("### Funil de Conversão")
         fig_funil = go.Figure(go.Funnel(
-            y=["Realizados", "Faturados", "Cancelados"],
-            x=[m["pedidos"], m["faturados"], m["cancelados"]],
-            marker={"color": ["#4a7cff", "#10b981", "#f43f5e"]},
+            y=["Realizados","Faturados","Cancelados"],
+            x=[m["pedidos"],m["faturados"],m["cancelados"]],
+            marker={"color":["#4a7cff","#10b981","#f43f5e"]},
             textinfo="value+percent initial",
         ))
         fig_funil.update_layout(**layout_normal())
         st.plotly_chart(fig_funil, use_container_width=True)
 
-        # Volume diário de pedidos por marca
         st.markdown("### Volume de Pedidos por Dia")
         if "marca" in df_atual.columns:
-            ped_dia = (df_atual.groupby(["data", "marca"])["id_pedido"]
-                       .nunique().reset_index().rename(columns={"id_pedido": "pedidos"}))
+            ped_dia = (df_atual.groupby(["data","marca"])["id_pedido"]
+                       .nunique().reset_index().rename(columns={"id_pedido":"pedidos"}))
             fig_pd = px.area(ped_dia, x="data", y="pedidos", color="marca",
                              color_discrete_map=COR_MARCAS,
-                             labels={"pedidos": "Pedidos", "data": ""})
+                             labels={"pedidos":"Pedidos","data":""})
             fig_pd.update_layout(**layout_normal())
             st.plotly_chart(fig_pd, use_container_width=True)
 
-        # Tabela de pedidos
         st.markdown("### Registro de Pedidos")
-        cols_ex = [c for c in ["data", "marca", "id_pedido", "produto", "sku",
-                                "quantidade_vendida", "valor_total", "status_pedido", "canal"]
+        cols_ex = [c for c in ["data","marca","id_pedido","produto","sku",
+                                "quantidade_vendida","valor_total","status_pedido","canal","canal_origem"]
                    if c in df_atual.columns]
         df_tab = df_atual[cols_ex].sort_values("data", ascending=False)
         st.dataframe(df_tab, use_container_width=True, hide_index=True)
@@ -1169,23 +985,21 @@ with tab_conv:
         st.info("Sem dados de conversão.")
     else:
         def taxa_conv_por_pedido(df: pd.DataFrame) -> pd.DataFrame:
-            """Taxa de conversão calculada por pedido único (não por linha de SKU)."""
             if df.empty or "marca" not in df.columns:
-                return pd.DataFrame(columns=["marca", "taxa"])
-            g = (df.groupby(["id_pedido", "marca"])
-                 .agg(faturado=("faturado", "any")).reset_index())
+                return pd.DataFrame(columns=["marca","taxa"])
+            g = (df.groupby(["id_pedido","marca"])
+                 .agg(faturado=("faturado","any")).reset_index())
             return (g.groupby("marca")
                     .apply(lambda x: x["faturado"].mean() * 100)
-                    .reset_index()
-                    .rename(columns={0: "taxa"}))
+                    .reset_index().rename(columns={0:"taxa"}))
 
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Taxa de Conversão por Marca — Atual vs Anterior**")
             if "marca" in df_atual.columns:
                 ca = taxa_conv_por_pedido(df_atual)
-                cp = (taxa_conv_por_pedido(df_ant).rename(columns={"taxa": "taxa_ant"})
-                      if not df_ant.empty else pd.DataFrame(columns=["marca", "taxa_ant"]))
+                cp = (taxa_conv_por_pedido(df_ant).rename(columns={"taxa":"taxa_ant"})
+                      if not df_ant.empty else pd.DataFrame(columns=["marca","taxa_ant"]))
                 cm = ca.merge(cp, on="marca", how="left").fillna(0)
                 fig_cv = go.Figure([
                     go.Bar(name="Anterior", x=cm["marca"], y=cm["taxa_ant"],
@@ -1199,11 +1013,11 @@ with tab_conv:
         with col_c2:
             st.markdown("**Evolução da Taxa de Conversão**")
             if "marca" in df_atual.columns:
-                ct = (df_atual.groupby(["data", "id_pedido", "marca"])
-                      .agg(faturado=("faturado", "any")).reset_index()
-                      .groupby(["data", "marca"])
+                ct = (df_atual.groupby(["data","id_pedido","marca"])
+                      .agg(faturado=("faturado","any")).reset_index()
+                      .groupby(["data","marca"])
                       .apply(lambda x: x["faturado"].mean() * 100)
-                      .reset_index().rename(columns={0: "conv"}))
+                      .reset_index().rename(columns={0:"conv"}))
                 fig_cvt = go.Figure()
                 for marca in ct["marca"].unique():
                     d = ct[ct["marca"] == marca].sort_values("data")
@@ -1214,10 +1028,9 @@ with tab_conv:
                 fig_cvt.update_layout(**layout_normal(), yaxis_ticksuffix="%")
                 st.plotly_chart(fig_cvt, use_container_width=True)
 
-        # Ticket médio por canal — calculado por pedido único
         if "canal" in df_atual.columns:
             tick_canal = (df_atual[df_atual["faturado"]]
-                          .groupby(["id_pedido", "canal"])["valor_total"]
+                          .groupby(["id_pedido","canal"])["valor_total"]
                           .sum().reset_index()
                           .groupby("canal")["valor_total"].mean())
             if not tick_canal.empty:
@@ -1228,19 +1041,18 @@ with tab_conv:
                     unsafe_allow_html=True,
                 )
 
-        # Taxa de conversão por canal
         st.markdown("### Taxa de Conversão por Canal")
         if "canal" in df_atual.columns:
-            conv_c = (df_atual.groupby(["id_pedido", "canal"])
-                      .agg(faturado=("faturado", "any")).reset_index()
+            conv_c = (df_atual.groupby(["id_pedido","canal"])
+                      .agg(faturado=("faturado","any")).reset_index()
                       .groupby("canal")
-                      .agg(pedidos=("id_pedido", "nunique"), faturados=("faturado", "sum"))
+                      .agg(pedidos=("id_pedido","nunique"), faturados=("faturado","sum"))
                       .reset_index())
-            conv_c["taxa"] = conv_c["faturados"] / conv_c["pedidos"].replace(0, np.nan) * 100
+            conv_c["taxa"] = conv_c["faturados"] / conv_c["pedidos"].replace(0,np.nan) * 100
             conv_c = conv_c.sort_values("taxa", ascending=True)
             fig_cc = px.bar(conv_c, x="taxa", y="canal", orientation="h",
                             color="canal", color_discrete_map=CORES_CANAL,
-                            labels={"taxa": "Taxa (%)", "canal": ""},
+                            labels={"taxa":"Taxa (%)","canal":""},
                             text=conv_c["taxa"].map("{:.1f}%".format))
             fig_cc.update_traces(textposition="outside")
             fig_cc.update_layout(**layout_invertido())
@@ -1256,11 +1068,9 @@ with tab_traf:
     if df_atual.empty or "canal" not in df_atual.columns:
         st.info("Coluna `origem_cliente` não encontrada nos dados.")
     else:
-        # Agrega sobre pedidos únicos para não inflar contagens multi-SKU
-        ped_canal = (df_atual.groupby(["id_pedido", "canal"])
+        ped_canal = (df_atual.groupby(["id_pedido","canal"])
                      .agg(faturado=("faturado","any"), receita=("valor_total","sum"))
                      .reset_index())
-
         ca_agg = (ped_canal.groupby("canal")
                   .agg(pedidos=("id_pedido","nunique"), faturados=("faturado","sum"),
                        receita=("receita","sum"))
@@ -1269,8 +1079,7 @@ with tab_traf:
         col_t1, col_t2 = st.columns(2)
         with col_t1:
             st.markdown("**Distribuição de Pedidos por Canal**")
-            cc = ca_agg[["canal","pedidos"]].copy()
-            fig_cc2 = px.pie(cc, names="canal", values="pedidos",
+            fig_cc2 = px.pie(ca_agg, names="canal", values="pedidos",
                              color="canal", color_discrete_map=CORES_CANAL, hole=0.55)
             fig_cc2.update_traces(textinfo="percent+label")
             fig_cc2.update_layout(**layout_normal())
@@ -1281,11 +1090,10 @@ with tab_traf:
             cr = ca_agg.sort_values("receita", ascending=True)
             fig_cr = px.bar(cr, x="receita", y="canal", orientation="h",
                             color="canal", color_discrete_map=CORES_CANAL,
-                            labels={"receita": "Receita (R$)", "canal": ""})
+                            labels={"receita":"Receita (R$)","canal":""})
             fig_cr.update_layout(**layout_invertido())
             st.plotly_chart(fig_cr, use_container_width=True)
 
-        # Atual vs anterior por canal
         st.markdown("### Canal: Atual vs Período Anterior")
         if not df_ant.empty and "canal" in df_ant.columns:
             ped_canal_ant = (df_ant.groupby(["id_pedido","canal"])
@@ -1295,81 +1103,73 @@ with tab_traf:
                       .reset_index())
             ccomp = ca_agg.merge(cp_agg, on="canal", how="left").fillna(0)
             ccomp["var"] = ccomp.apply(
-                lambda r: formatar_variacao(calcular_variacao(r["receita"], r["rec_ant"])) or "—", axis=1
+                lambda r: formatar_variacao(calcular_variacao(r["receita"],r["rec_ant"])) or "—", axis=1
             )
             fig_ccp = go.Figure([
                 go.Bar(name="Anterior", x=ccomp["canal"], y=ccomp["rec_ant"],
                        marker_color="rgba(100,120,160,0.4)"),
                 go.Bar(name="Atual", x=ccomp["canal"], y=ccomp["receita"],
-                       marker_color=[CORES_CANAL.get(c, "#4a7cff") for c in ccomp["canal"]],
+                       marker_color=[CORES_CANAL.get(c,"#4a7cff") for c in ccomp["canal"]],
                        text=ccomp["var"], textposition="outside"),
             ])
             fig_ccp.update_layout(barmode="group", **layout_normal())
             st.plotly_chart(fig_ccp, use_container_width=True)
 
-        # Canal x Marca
         st.markdown("### Canal por Marca")
         if "marca" in df_atual.columns:
             cm2 = (df_atual[df_atual["faturado"]]
-                   .groupby(["marca", "canal"])["valor_total"].sum().reset_index())
+                   .groupby(["marca","canal"])["valor_total"].sum().reset_index())
             fig_cm2 = px.bar(cm2, x="marca", y="valor_total", color="canal",
                              color_discrete_map=CORES_CANAL, barmode="stack",
-                             labels={"valor_total": "Receita Faturada (R$)", "marca": "", "canal": "Canal"})
+                             labels={"valor_total":"Receita Faturada (R$)","marca":"","canal":"Canal"})
             fig_cm2.update_layout(**layout_normal())
             st.plotly_chart(fig_cm2, use_container_width=True)
 
-        # Resumo por canal
         st.markdown("### Resumo por Canal")
         canal_tab = ca_agg.copy()
-        canal_tab["taxa_conv"]    = (canal_tab["faturados"] / canal_tab["pedidos"].replace(0, np.nan) * 100).map("{:.1f}%".format)
-        canal_tab["receita_fmt"]  = canal_tab["receita"].map("R$ {:,.0f}".format)
+        canal_tab["taxa_conv"]   = (canal_tab["faturados"] / canal_tab["pedidos"].replace(0,np.nan) * 100).map("{:.1f}%".format)
+        canal_tab["receita_fmt"] = canal_tab["receita"].map("R$ {:,.0f}".format)
         canal_tab = canal_tab.rename(columns={
-            "canal": "Canal", "pedidos": "Pedidos", "faturados": "Faturados",
-            "taxa_conv": "Taxa Conv.", "receita_fmt": "Receita",
+            "canal":"Canal","pedidos":"Pedidos","faturados":"Faturados",
+            "taxa_conv":"Taxa Conv.","receita_fmt":"Receita",
         })
-        st.dataframe(canal_tab[["Canal", "Pedidos", "Faturados", "Taxa Conv.", "Receita"]],
+        st.dataframe(canal_tab[["Canal","Pedidos","Faturados","Taxa Conv.","Receita"]],
                      use_container_width=True, hide_index=True)
         st.download_button("📥 Exportar",
                            data=canal_tab.to_csv(index=False).encode("utf-8"),
                            file_name="canais.csv", mime="text/csv")
 
-        # Detalhamento por campanha
         st.markdown("### Detalhamento por Campanha")
         if "campanha" in df_atual.columns and "tipo_canal" in df_atual.columns:
-            camp_a = (df_atual.groupby(["tipo_canal", "campanha"])
+            camp_a = (df_atual.groupby(["tipo_canal","campanha"])
                       .agg(pedidos=("id_pedido","nunique"),
                            faturados=("faturado","sum"),
                            receita=("valor_total","sum"))
                       .reset_index())
-
             if not df_ant.empty and "campanha" in df_ant.columns:
-                camp_p = (df_ant.groupby("campanha")
-                          .agg(rec_ant=("valor_total","sum")).reset_index())
+                camp_p = df_ant.groupby("campanha").agg(rec_ant=("valor_total","sum")).reset_index()
                 camp_a = camp_a.merge(camp_p, on="campanha", how="left").fillna(0)
                 camp_a["var"] = camp_a.apply(
-                    lambda r: formatar_variacao(calcular_variacao(r["receita"], r["rec_ant"])) or "—",
-                    axis=1,
+                    lambda r: formatar_variacao(calcular_variacao(r["receita"],r["rec_ant"])) or "—", axis=1
                 )
             else:
                 camp_a["var"] = "—"
-
             camp_a["taxa_conv"] = (
-                camp_a["faturados"] / camp_a["pedidos"].replace(0, np.nan) * 100
+                camp_a["faturados"] / camp_a["pedidos"].replace(0,np.nan) * 100
             ).map("{:.1f}%".format)
             camp_a = camp_a.sort_values("receita", ascending=False)
 
             fig_camp = px.bar(camp_a.head(20), x="receita", y="campanha", color="tipo_canal",
                               orientation="h", color_discrete_map=CORES_CANAL,
-                              labels={"receita": "Receita (R$)", "campanha": "", "tipo_canal": "Canal"})
+                              labels={"receita":"Receita (R$)","campanha":"","tipo_canal":"Canal"})
             fig_camp.update_layout(**layout_invertido())
             st.plotly_chart(fig_camp, use_container_width=True)
 
             camp_exib = camp_a.copy()
             camp_exib["receita"] = camp_exib["receita"].map("R$ {:,.0f}".format)
             camp_exib = camp_exib.rename(columns={
-                "tipo_canal": "Tipo de Canal", "campanha": "Campanha",
-                "pedidos": "Pedidos", "faturados": "Faturados",
-                "taxa_conv": "Taxa Conv.", "receita": "Receita", "var": "Var. vs Ant.",
+                "tipo_canal":"Tipo de Canal","campanha":"Campanha","pedidos":"Pedidos",
+                "faturados":"Faturados","taxa_conv":"Taxa Conv.","receita":"Receita","var":"Var. vs Ant.",
             })
             cols_c = [c for c in ["Tipo de Canal","Campanha","Pedidos","Faturados","Taxa Conv.","Receita","Var. vs Ant."]
                       if c in camp_exib.columns]
@@ -1386,7 +1186,7 @@ with tab_marca_aba:
     st.markdown("### 🏷️ Análise por Marca")
 
     if not marcas_selecionadas:
-        st.info("Nenhuma marca selecionada nos filtros.")
+        st.info("Nenhuma marca selecionada nos filtros globais.")
     else:
         marca_sel = st.selectbox("Marca", marcas_selecionadas, key="marca_ind")
 
@@ -1399,16 +1199,16 @@ with tab_marca_aba:
             m_a = calcular_metricas_pedidos(df_ma)
             m_p = calcular_metricas_pedidos(df_mp) if not df_mp.empty else {}
 
-            km1, km2, km3, km4, km5 = st.columns(5)
-            km1.metric("Receita",     f"R$ {m_a['receita']:,.0f}",
-                       delta=formatar_variacao(calcular_variacao(m_a["receita"],       m_p.get("receita", 0))))
-            km2.metric("Pedidos",     f"{m_a['pedidos']:,}",
-                       delta=formatar_variacao(calcular_variacao(m_a["pedidos"],       m_p.get("pedidos", 0))))
-            km3.metric("Faturados",   f"{m_a['faturados']:,}",
-                       delta=formatar_variacao(calcular_variacao(m_a["faturados"],     m_p.get("faturados", 0))))
-            km4.metric("Cancelados",  f"{m_a['cancelados']:,}")
-            km5.metric("Ticket Médio",f"R$ {m_a['ticket_medio']:,.0f}",
-                       delta=formatar_variacao(calcular_variacao(m_a["ticket_medio"],  m_p.get("ticket_medio", 0))))
+            km1,km2,km3,km4,km5 = st.columns(5)
+            km1.metric("Receita",      f"R$ {m_a['receita']:,.0f}",
+                       delta=formatar_variacao(calcular_variacao(m_a["receita"],      m_p.get("receita",0))))
+            km2.metric("Pedidos",      f"{m_a['pedidos']:,}",
+                       delta=formatar_variacao(calcular_variacao(m_a["pedidos"],      m_p.get("pedidos",0))))
+            km3.metric("Faturados",    f"{m_a['faturados']:,}",
+                       delta=formatar_variacao(calcular_variacao(m_a["faturados"],    m_p.get("faturados",0))))
+            km4.metric("Cancelados",   f"{m_a['cancelados']:,}")
+            km5.metric("Ticket Médio", f"R$ {m_a['ticket_medio']:,.0f}",
+                       delta=formatar_variacao(calcular_variacao(m_a["ticket_medio"], m_p.get("ticket_medio",0))))
 
             st.markdown("<br>", unsafe_allow_html=True)
             col_m1, col_m2 = st.columns(2)
@@ -1416,19 +1216,20 @@ with tab_marca_aba:
             with col_m1:
                 st.markdown(f"**Top 10 Produtos — {marca_sel}**")
                 if "produto" in df_ma.columns and "quantidade_vendida" in df_ma.columns:
-                    top_m = (df_ma[df_ma["faturado"]]
-                             .groupby("produto")["quantidade_vendida"]
-                             .sum().nlargest(10).reset_index())
-                    fig_tm = px.bar(top_m, x="quantidade_vendida", y="produto", orientation="h",
-                                    color_discrete_sequence=[cor_marca(marca_sel)],
-                                    labels={"quantidade_vendida": "Unidades", "produto": ""})
-                    fig_tm.update_layout(**layout_invertido())
-                    st.plotly_chart(fig_tm, use_container_width=True)
+                    df_ma_p = df_ma[df_ma["faturado"] & (df_ma["produto"].str.strip() != "")]
+                    if df_ma_p.empty:
+                        st.info("Dados de produto disponíveis apenas no canal ecommerce.")
+                    else:
+                        top_m = df_ma_p.groupby("produto")["quantidade_vendida"].sum().nlargest(10).reset_index()
+                        fig_tm = px.bar(top_m, x="quantidade_vendida", y="produto", orientation="h",
+                                        color_discrete_sequence=[cor_marca(marca_sel)],
+                                        labels={"quantidade_vendida":"Unidades","produto":""})
+                        fig_tm.update_layout(**layout_invertido())
+                        st.plotly_chart(fig_tm, use_container_width=True)
 
             with col_m2:
                 st.markdown(f"**Origem dos Clientes — {marca_sel}**")
                 if "canal" in df_ma.columns:
-                    # Contagem por pedido único, não por linha de SKU
                     canal_ped = (df_ma.groupby(["id_pedido","canal"])
                                  .size().reset_index(name="_")
                                  .groupby("canal").size().reset_index(name="qtd"))
@@ -1438,7 +1239,6 @@ with tab_marca_aba:
                     fig_cm3.update_layout(**layout_normal())
                     st.plotly_chart(fig_cm3, use_container_width=True)
 
-            # Receita diária faturada
             st.markdown(f"**Receita Diária Faturada — {marca_sel}**")
             rd = df_ma[df_ma["faturado"]].groupby("data")["valor_total"].sum().reset_index()
             cor_m = cor_marca(marca_sel)
@@ -1452,7 +1252,6 @@ with tab_marca_aba:
             fig_rd.update_layout(**layout_normal())
             st.plotly_chart(fig_rd, use_container_width=True)
 
-            # Receita mensal faturada
             st.markdown(f"**Receita Mensal Faturada — {marca_sel}**")
             men_m = df_ma[df_ma["faturado"]].groupby("mes")["valor_total"].sum().reset_index()
             fig_mm = go.Figure([go.Bar(
@@ -1462,9 +1261,8 @@ with tab_marca_aba:
             fig_mm.update_layout(**layout_normal())
             st.plotly_chart(fig_mm, use_container_width=True)
 
-            # Exportar dados da marca
-            csv_marca = df_ma.to_csv(index=False).encode("utf-8")
-            st.download_button(f"📥 Exportar dados {marca_sel}", data=csv_marca,
+            st.download_button(f"📥 Exportar dados {marca_sel}",
+                               data=df_ma.to_csv(index=False).encode("utf-8"),
                                file_name=f"{marca_sel.lower()}_periodo.csv", mime="text/csv")
 
 # ─────────────────────────────────────────────
