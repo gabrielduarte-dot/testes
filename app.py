@@ -225,11 +225,13 @@ def prep_mp(raw: pd.DataFrame) -> pd.DataFrame:
 
     name_map = {}
     for tgt, alts in [
-        ("DATA",        ["DATA","DATE","DT","DATA_NF"]),
-        ("NOTA",        ["NOTA","NF","INVOICE","ORDER_ID","NUMERO_NF","NUM_NF","NUMERO"]),
-        ("QUANTIDADE",  ["QUANTIDADE","QTY","QUANTITY","QTD","QTDE","QTDADE"]),
-        ("VALOR",       ["VALOR","PRICE","UNIT_PRICE","VALOR_UNITARIO","VALOR_UNIT","VLR"]),
+        ("DATA",        ["DATA","DATE","DT","DATA_NF","DATA DO FATURAMENTO","DATA_FATURAMENTO"]),
+        ("NOTA",        ["NOTA","NF","INVOICE","ORDER_ID","NUMERO_NF","NUM_NF","NUMERO","NOTA FISCAL"]),
+        ("QUANTIDADE",  ["QUANTIDADE","QTY","QUANTITY","QTD","QTDE","QTDADE","QUANTIDADE FATURADA"]),
+        ("VALOR",       ["VALOR","PRICE","UNIT_PRICE","VALOR_UNITARIO","VALOR_UNIT","VLR","VALOR UNITÁRIO FINAL","VALOR UNITARIO FINAL"]),
         ("MARKETPLACE", ["MARKETPLACE","CANAL","PLATAFORMA","SOURCE","CHANNEL","LOJA","SELLER","SITE"]),
+        ("REFERENCIA",  ["REFERENCIA","REFERÊNCIA","REF","SKU","CODIGO","CÓDIGO","MATERIAL","COD_PRODUTO","CODIGO_PRODUTO"]),
+        ("FOTO",        ["FOTO","FOTO DO PRODUTO","FOTO_PRODUTO","IMAGE","IMAGEM","IMG","URL_FOTO","LINK_FOTO"]),
     ]:
         for c in df.columns:
             if c in alts or c == tgt:
@@ -271,6 +273,23 @@ def prep_mp(raw: pd.DataFrame) -> pd.DataFrame:
     df["marca"] = df["MARKETPLACE"].apply(
         lambda x: MARCA_MAP.get(str(x).strip(), str(x).strip())
     )
+
+    if "REFERENCIA" in df.columns:
+        df["referencia"] = df["REFERENCIA"].astype(str).str.strip()
+    else:
+        df["referencia"] = ""
+
+    if "FOTO" in df.columns:
+        df["img_url"] = df["FOTO"].astype(str).str.strip().apply(
+            lambda u: u if u.startswith("http") else ""
+        )
+    else:
+        df["img_url"] = df.apply(
+            lambda r: (f"{IMG_BASE_URL}/{r['marca']}/Baixa/{r['referencia']}{IMG_EXT}"
+                       if r["referencia"] else ""),
+            axis=1,
+        )
+
     df = df.dropna(subset=["data"])
     return df
 
@@ -331,7 +350,12 @@ def agg_nf(df_mp: pd.DataFrame, canal_tipo: str) -> pd.DataFrame:
     if sub.empty: return pd.DataFrame()
     return (
         sub.groupby(["nota","MARKETPLACE","marca","data"])
-        .agg(receita=("line_total","sum"), itens=("qty_num","sum"))
+        .agg(
+            receita=("line_total","sum"),
+            itens=("qty_num","sum"),
+            referencia=("referencia","first"),
+            img_url=("img_url","first"),
+        )
         .reset_index()
     )
 
@@ -839,218 +863,173 @@ with tab_mp_tab:
 
 
 with tab_prod:
-    if not has_ec or df_ec.empty:
-        st.info("Carregue a planilha E-commerce para visualizar o ranking de produtos.")
-        st.stop()
+    all_mp_concat = pd.concat(
+        [df for df in [mp_ecom_all, mp_mkt_all] if not df.empty],
+        ignore_index=True
+    ) if (not mp_ecom_all.empty or not mp_mkt_all.empty) else pd.DataFrame()
 
-    df_fp   = fdt(df_ec, data_ini, data_fim)
-    if not df_fp.empty:
-        df_fp = df_fp[~df_fp["livelo"]].copy()
-    df_fat2 = df_fp[df_fp["faturado"]].copy() if not df_fp.empty else pd.DataFrame()
+    mp_period_all = fdt(all_mp_concat, data_ini, data_fim) if not all_mp_concat.empty else pd.DataFrame()
 
-    if df_fat2.empty:
-        st.info("Sem pedidos faturados no período para exibir ranking de produtos.")
-        st.stop()
+    has_ref = (not mp_period_all.empty
+               and "referencia" in mp_period_all.columns
+               and mp_period_all["referencia"].ne("").any())
 
-    st.markdown(
-        "<div class='info'>ℹ️ Ranking calculado a partir de <code>sku_selling_price × quantity_sku</code> "
-        "da planilha E-commerce, agrupado por <strong>marca (coluna brand/seller)</strong>. "
-        "Pedidos do canal Livelo excluídos. "
-        "A receita oficial está nas abas E-commerce e Marketplace.</div>",
-        unsafe_allow_html=True)
-
-    pf1, pf2 = st.columns([3, 1])
-    with pf1:
-        sellers_d = sorted(df_fat2["brand"].dropna().unique().tolist())
-        sellers_s = st.multiselect("Filtrar por Marca / Seller", sellers_d, default=sellers_d, key="pm")
-    with pf2:
-        top_n = st.selectbox("Top N por marca", [5, 10, 15, 20], index=1, key="tn")
-
-    df_s = df_fat2[df_fat2["brand"].isin(sellers_s)] if sellers_s else df_fat2
-
-    prod = (
-        df_s.groupby(["brand", "sku", "product_name"])
-        .agg(
-            qty=("quantity_sku", "sum"),
-            orders=("order", "nunique"),
-            receita=("line_total", "sum"),
-            img_url=("img_url", "first"),
-        )
-        .reset_index()
-        .sort_values("qty", ascending=False)
-    )
-    prod["qty"]    = prod["qty"].round().astype(int)
-    prod["orders"] = prod["orders"].astype(int)
-
-    marcas_ativas = prod["brand"].unique().tolist()
-    ncols = min(len(marcas_ativas), 4)
-
-    if ncols > 0:
-        sh("Top por Quantidade Vendida — por Marca (Seller)")
-        cols_b1 = st.columns(ncols)
-        for idx, marca in enumerate(marcas_ativas):
-            df_marca = prod[prod["brand"] == marca].sort_values("qty", ascending=False).head(top_n)
-            cor = COR_MARCA.get(marca, "#3b6fff")
-            with cols_b1[idx % ncols]:
-                st.markdown(f"<div style='font-size:.8rem;font-weight:700;color:{cor};margin-bottom:6px;'>{marca}</div>", unsafe_allow_html=True)
-                fig_bm = px.bar(df_marca, x="qty", y="product_name", orientation="h",
-                                labels={"qty": "Unidades", "product_name": ""},
-                                color_discrete_sequence=[cor])
-                fig_bm.update_layout(**Li(
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    height=max(200, min(top_n * 38, 420)),
-                    showlegend=False,
-                ))
-                st.plotly_chart(fig_bm, use_container_width=True)
-
-        sh("Top por Receita Estimada — por Marca (Seller)")
-        cols_b2 = st.columns(ncols)
-        for idx, marca in enumerate(marcas_ativas):
-            df_marca2 = prod[prod["brand"] == marca].sort_values("receita", ascending=False).head(top_n)
-            cor = COR_MARCA.get(marca, "#3b6fff")
-            with cols_b2[idx % ncols]:
-                st.markdown(f"<div style='font-size:.8rem;font-weight:700;color:{cor};margin-bottom:6px;'>{marca}</div>", unsafe_allow_html=True)
-                fig_bm2 = px.bar(df_marca2, x="receita", y="product_name", orientation="h",
-                                 labels={"receita": "Receita Est. (R$)", "product_name": ""},
-                                 color_discrete_sequence=[cor])
-                fig_bm2.update_layout(**Li(
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    height=max(200, min(top_n * 38, 420)),
-                    showlegend=False,
-                ))
-                st.plotly_chart(fig_bm2, use_container_width=True)
-
-    sh("Volume Total de Itens por Marca")
-    seller_qty = prod.groupby("brand")[["qty", "receita"]].sum().reset_index().sort_values("qty", ascending=False)
-    sq1, sq2 = st.columns(2)
-    with sq1:
-        fig_sq = px.bar(seller_qty, x="brand", y="qty",
-                        color="brand", color_discrete_map=COR_MARCA,
-                        labels={"qty": "Unidades Vendidas", "brand": ""},
-                        text=seller_qty["qty"].astype(str))
-        fig_sq.update_traces(textposition="outside")
-        fig_sq.update_layout(**L())
-        st.plotly_chart(fig_sq, use_container_width=True)
-    with sq2:
-        fig_sqp = px.pie(seller_qty, names="brand", values="qty",
-                         color="brand", color_discrete_map=COR_MARCA, hole=0.55)
-        fig_sqp.update_traces(textinfo="percent+label", textfont_size=11)
-        fig_sqp.update_layout(**L(margin=dict(l=10, r=10, t=30, b=10)))
-        st.plotly_chart(fig_sqp, use_container_width=True)
-
-    sh("Curva de Pareto — Top 15 Produtos por Volume")
-    p80 = prod.sort_values("qty", ascending=False).head(15).copy()
-    total_qty = p80["qty"].sum()
-    if total_qty > 0:
-        p80["cum_pct"] = p80["qty"].cumsum() / prod["qty"].sum() * 100
-        n80 = int((prod.sort_values("qty", ascending=False)["qty"].cumsum() / prod["qty"].sum() * 100 <= 80).sum()) + 1
-        pct_cat = n80 / len(prod) * 100 if len(prod) > 0 else 0
+    if not has_ref:
         st.markdown(
-            f"<div class='info'>📐 <strong>Pareto (catálogo completo):</strong> "
-            f"<strong>{n80} produto(s) ({pct_cat:.0f}% do catálogo)</strong> "
-            f"representam 80% do volume de unidades vendidas. "
-            f"Exibindo top 15 no gráfico.</div>",
+            "<div class='info'>ℹ️ A planilha de faturamento ainda não contém colunas de referência/foto. "
+            "Adicione as colunas <code>referencia</code> e <code>foto do produto</code> para "
+            "visualizar os itens vendidos com imagens.</div>",
             unsafe_allow_html=True)
-        fig_par = go.Figure()
-        fig_par.add_trace(go.Bar(
-            x=p80["product_name"].str[:50],
-            y=p80["qty"],
-            marker_color="#3b6fff",
-            name="Unidades",
-            opacity=0.85,
-        ))
-        fig_par.add_trace(go.Scatter(
-            x=p80["product_name"].str[:50],
-            y=p80["cum_pct"],
-            mode="lines+markers",
-            name="% Acumulado (sobre total)",
-            line=dict(color="#f59e0b", width=2),
-            yaxis="y2",
-        ))
-        fig_par.add_hline(y=80, line_dash="dot", line_color="#f43f5e",
-                          yref="y2", annotation_text="80%",
-                          annotation=dict(font_color="#f43f5e"))
-        fig_par.update_layout(
-            **L(), xaxis_tickangle=-30,
-            yaxis2=dict(overlaying="y", side="right", range=[0, 105], ticksuffix="%",
-                        gridcolor="rgba(0,0,0,0)", tickcolor="#1e2d4a", linecolor="#1e2d4a"),
+    else:
+        prod_mp = (
+            mp_period_all[mp_period_all["referencia"] != ""]
+            .groupby(["referencia", "img_url", "marca"])
+            .agg(receita=("receita", "sum"), qtd=("itens", "sum"))
+            .reset_index()
+            .sort_values("receita", ascending=False)
         )
-        st.plotly_chart(fig_par, use_container_width=True)
+        prod_mp["qtd"] = prod_mp["qtd"].round().astype(int)
 
-    sh("Tabela de SKUs com Imagens")
+        pf1, pf2, pf3 = st.columns([2, 1, 1])
+        with pf1:
+            marcas_d = sorted(prod_mp["marca"].unique().tolist())
+            marcas_s = st.multiselect("Filtrar por Marca", marcas_d, default=marcas_d, key="pm")
+        with pf2:
+            ordem_prod = st.selectbox("Ordenar por", ["Receita Total", "Quantidade"], key="po")
+        with pf3:
+            top_n_mp = st.selectbox("Exibir top", [10, 20, 30, 50, 100], index=1, key="tn")
 
-    def img_or_placeholder(url: str) -> str:
-        url = str(url).strip()
-        if url.startswith("http"):
-            return (
-                f"<img src='{url}' "
-                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='flex';\" "
-                f"style='max-height:150px;max-width:100%;object-fit:contain;'/>"
-                f"<div class='prod-img-placeholder' style='display:none;'>⌚</div>"
+        prod_filtrado = prod_mp[prod_mp["marca"].isin(marcas_s)] if marcas_s else prod_mp
+        sort_col = "receita" if ordem_prod == "Receita Total" else "qtd"
+        prod_filtrado = prod_filtrado.sort_values(sort_col, ascending=False).head(top_n_mp).reset_index(drop=True)
+
+        receita_total = prod_filtrado["receita"].sum()
+        qtd_total = int(prod_filtrado["qtd"].sum())
+
+        sh("Itens Vendidos")
+
+        table_rows = ""
+        for _, row in prod_filtrado.iterrows():
+            img_url = str(row.get("img_url", "")).strip()
+            cor = COR_MARCA.get(row["marca"], "#64748b")
+            ref_full = str(row["referencia"])
+            ref_display = ref_full[:20] + ("\u2026" if len(ref_full) > 20 else "")
+            onerr = "this.style.display='none';this.nextSibling.style.display='flex';"
+            if img_url.startswith("http"):
+                foto_td = (
+                    f"<td class='foto-cell'>"
+                    f"<img src='{img_url}' onerror=\"{onerr}\" "
+                    f"style='width:52px;height:52px;object-fit:contain;border-radius:6px;background:#0d1321;'/>"
+                    f"<div class='no-img' style='display:none;'>&#8987;</div>"
+                    f"</td>"
+                )
+            else:
+                foto_td = "<td class='foto-cell'><div class='no-img'>&#8987;</div></td>"
+            table_rows += (
+                f"<tr>"
+                f"{foto_td}"
+                f"<td class='ref' title='{ref_full}'>{ref_display}</td>"
+                f"<td class='marca-cell' style='color:{cor};'>{row['marca']}</td>"
+                f"<td class='num'>{brl(row['receita'])}</td>"
+                f"<td class='num'>{row['qtd']:,}</td>"
+                f"</tr>"
             )
-        return "<div class='prod-img-placeholder'>⌚</div>"
 
-    prod_sorted = prod.sort_values(["brand", "qty"], ascending=[True, False]).reset_index(drop=True)
-
-    filter_col, _ = st.columns([3, 1])
-    with filter_col:
-        marcas_grid = sorted(prod_sorted["brand"].unique().tolist())
-        marca_filter = st.multiselect(
-            "Filtrar marca na tabela", marcas_grid, default=marcas_grid, key="img_marca"
+        total_row = (
+            f"<tr class='total-row'>"
+            f"<td colspan='3'><strong>Total geral</strong></td>"
+            f"<td class='num'><strong>{brl(receita_total)}</strong></td>"
+            f"<td class='num'><strong>{qtd_total:,}</strong></td>"
+            f"</tr>"
         )
-    prod_grid = prod_sorted[prod_sorted["brand"].isin(marca_filter)] if marca_filter else prod_sorted
 
-    for marca, grupo in prod_grid.groupby("brand", sort=False):
-        cor = COR_MARCA.get(marca, "#3b6fff")
-        st.markdown(
-            f"<div style='font-size:.75rem;font-weight:700;color:{cor};"
-            f"text-transform:uppercase;letter-spacing:.1em;margin:18px 0 10px;'>{marca}</div>",
-            unsafe_allow_html=True,
-        )
-        cards_html = "<div class='prod-grid'>"
-        for _, row in grupo.iterrows():
-            img_url     = str(row.get("img_url", "")).strip()
-            receita_fmt = brl(row["receita"])
-            badge_color = cor
-            cards_html += f"""
-            <div class="prod-card">
-              <div class="prod-img-wrap">
-                {img_or_placeholder(img_url)}
-              </div>
-              <div class="prod-info">
-                <span class="prod-badge" style="background:{badge_color}22;color:{badge_color};border:1px solid {badge_color}44;">{row['brand']}</span>
-                <div class="prod-name">{row['product_name']}</div>
-                <div class="prod-sku">{row['sku']}</div>
-                <div class="prod-stats">
-                  <div class="prod-stat">
-                    <span class="prod-stat-label">Unidades</span>
-                    <span class="prod-stat-val">{row['qty']:,}</span>
-                  </div>
-                  <div class="prod-stat">
-                    <span class="prod-stat-label">Pedidos</span>
-                    <span class="prod-stat-val">{row['orders']:,}</span>
-                  </div>
-                  <div class="prod-stat">
-                    <span class="prod-stat-label">Receita Est.</span>
-                    <span class="prod-stat-val" style="font-size:.75rem;">{receita_fmt}</span>
-                  </div>
-                </div>
-              </div>
-            </div>"""
-        cards_html += "</div>"
-        st.markdown(cards_html, unsafe_allow_html=True)
+        st.markdown(f"""
+        <style>
+        .ptable{{width:100%;border-collapse:collapse;font-family:'DM Sans',sans-serif;}}
+        .ptable th{{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+                   color:#475569;padding:8px 14px;border-bottom:2px solid #1e2d4a;text-align:left;}}
+        .ptable th.num{{text-align:right;}}
+        .ptable td{{padding:10px 14px;border-bottom:1px solid #111827;vertical-align:middle;}}
+        .ptable tr:hover td{{background:rgba(59,111,255,.04);}}
+        .ptable td.num{{text-align:right;font-family:'DM Mono',monospace;color:#f1f5f9;font-size:.88rem;font-weight:600;}}
+        .ptable td.ref{{font-family:'DM Mono',monospace;font-size:.78rem;color:#94a3b8;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+        .ptable td.marca-cell{{font-size:.78rem;font-weight:700;}}
+        .ptable .foto-cell{{width:62px;padding:5px 10px;}}
+        .no-img{{width:52px;height:52px;border-radius:6px;background:#1e2d4a;display:flex;align-items:center;justify-content:center;font-size:1.3rem;}}
+        .ptable .total-row td{{border-top:2px solid #1e2d4a;font-weight:700;color:#f1f5f9;background:rgba(59,111,255,.07);}}
+        .ptable .total-row td.num{{color:#f1f5f9;}}
+        </style>
+        <table class="ptable">
+          <thead><tr>
+            <th class="foto-cell">Foto</th>
+            <th>Referência</th>
+            <th>Marca</th>
+            <th class="num">Receita Total</th>
+            <th class="num">Qtde</th>
+          </tr></thead>
+          <tbody>{table_rows}{total_row}</tbody>
+        </table>""", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='info'>🔗 <strong>URL de imagem:</strong> "
-        f"<code>{IMG_BASE_URL}/{{Marca}}/Baixa/{{SKU}}{IMG_EXT}</code> — "
-        f"construída a partir das colunas <code>brand</code> e <code>sku</code>, "
-        f"ou lida diretamente da coluna <code>foto_produto</code> quando presente na planilha.</div>",
-        unsafe_allow_html=True,
-    )
-    st.download_button("📥 Exportar SKUs por Marca",
-                       data=prod.to_csv(index=False).encode("utf-8"),
-                       file_name="skus_marca.csv", mime="text/csv")
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        sh("Volume de Receita por Marca")
+        seller_rec = prod_mp.groupby("marca")[["receita","qtd"]].sum().reset_index().sort_values("receita", ascending=False)
+        sr1, sr2 = st.columns(2)
+        with sr1:
+            fig_sr = px.bar(seller_rec, x="marca", y="receita",
+                            color="marca", color_discrete_map=COR_MARCA,
+                            labels={"receita":"Receita (R$)","marca":""},
+                            text=seller_rec["receita"].map(brl))
+            fig_sr.update_traces(textposition="outside")
+            fig_sr.update_layout(**L())
+            st.plotly_chart(fig_sr, use_container_width=True)
+        with sr2:
+            fig_srp = px.pie(seller_rec, names="marca", values="receita",
+                             color="marca", color_discrete_map=COR_MARCA, hole=0.55)
+            fig_srp.update_traces(textinfo="percent+label", textfont_size=11)
+            fig_srp.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+            st.plotly_chart(fig_srp, use_container_width=True)
+
+        sh("Curva de Pareto — Top 15 Referências por Volume")
+        p80 = prod_mp.sort_values("qtd", ascending=False).head(15).copy()
+        total_qtd_all = prod_mp["qtd"].sum()
+        if total_qtd_all > 0:
+            p80["cum_pct"] = p80["qtd"].cumsum() / total_qtd_all * 100
+            n80 = int((prod_mp.sort_values("qtd",ascending=False)["qtd"].cumsum() / total_qtd_all * 100 <= 80).sum()) + 1
+            pct_cat = n80 / len(prod_mp) * 100 if len(prod_mp) > 0 else 0
+            st.markdown(
+                f"<div class='info'>📐 <strong>Pareto:</strong> "
+                f"<strong>{n80} referência(s) ({pct_cat:.0f}% do mix)</strong> "
+                f"representam 80% do volume faturado.</div>",
+                unsafe_allow_html=True)
+            fig_par = go.Figure()
+            fig_par.add_trace(go.Bar(
+                x=p80["referencia"].str[:30], y=p80["qtd"],
+                marker_color=[COR_MARCA.get(b,"#3b6fff") for b in p80["marca"]],
+                name="Unidades", opacity=0.85,
+            ))
+            fig_par.add_trace(go.Scatter(
+                x=p80["referencia"].str[:30], y=p80["cum_pct"],
+                mode="lines+markers", name="% Acumulado",
+                line=dict(color="#f59e0b", width=2), yaxis="y2",
+            ))
+            fig_par.add_hline(y=80, line_dash="dot", line_color="#f43f5e",
+                              yref="y2", annotation_text="80%",
+                              annotation=dict(font_color="#f43f5e"))
+            fig_par.update_layout(
+                **L(), xaxis_tickangle=-30,
+                yaxis2=dict(overlaying="y", side="right", range=[0,105], ticksuffix="%",
+                            gridcolor="rgba(0,0,0,0)", tickcolor="#1e2d4a", linecolor="#1e2d4a"),
+            )
+            st.plotly_chart(fig_par, use_container_width=True)
+
+        st.download_button("📥 Exportar itens vendidos",
+                           data=prod_mp.rename(columns={
+                               "referencia":"Referência","marca":"Marca",
+                               "receita":"Receita Total","qtd":"Quantidade","img_url":"URL Foto",
+                           }).to_csv(index=False).encode("utf-8"),
+                           file_name="itens_vendidos.csv", mime="text/csv")
+
 
 st.markdown("---")
 st.markdown(
