@@ -55,6 +55,21 @@ hr{border-color:#1a2540!important;}
 .rc-green{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.25);}
 .rc-red{background:rgba(244,63,94,.15);color:#fb7185;border:1px solid rgba(244,63,94,.25);}
 .rc-amber{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.25);}
+.prod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:12px;}
+.prod-card{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:14px;overflow:hidden;transition:all .25s;display:flex;flex-direction:column;}
+.prod-card:hover{border-color:#3b6fff;box-shadow:0 0 20px rgba(59,111,255,.12);transform:translateY(-2px);}
+.prod-img-wrap{background:#0d1321;height:160px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-bottom:1px solid #1a2540;}
+.prod-img-wrap img{max-height:150px;max-width:100%;object-fit:contain;transition:transform .3s;}
+.prod-card:hover .prod-img-wrap img{transform:scale(1.06);}
+.prod-img-placeholder{width:60px;height:60px;border-radius:50%;background:#1e2d4a;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#3b6fff;}
+.prod-info{padding:14px 16px;flex:1;display:flex;flex-direction:column;gap:4px;}
+.prod-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.7rem;font-weight:700;font-family:'DM Mono',monospace;margin-bottom:4px;}
+.prod-name{font-size:.82rem;font-weight:600;color:#e2e8f0;line-height:1.4;margin-bottom:6px;}
+.prod-sku{font-size:.7rem;color:#475569;font-family:'DM Mono',monospace;}
+.prod-stats{display:flex;gap:12px;margin-top:auto;padding-top:10px;border-top:1px solid #1a2540;}
+.prod-stat{display:flex;flex-direction:column;gap:2px;}
+.prod-stat-label{font-size:.65rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;font-weight:600;}
+.prod-stat-val{font-size:.85rem;font-weight:700;color:#f1f5f9;font-family:'DM Mono',monospace;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,11 +102,26 @@ COR_MP = {
     "Amazon":        "#fb923c",
     "Outros":        "#64748b",
 }
+IMG_BASE_URL = "https://storage.googleapis.com/banco-imagens/Relogios"
+IMG_EXT      = ".jpg"
+
+EC_COLS_19 = [
+    "order","created_at","customer_name","state","status","utmsource",
+    "marketingtags","payment_method","installments","quantity_sku","phone",
+    "sku","product_name","sku_selling_price","sku_total_price",
+    "discount_tags","brand","livelo_tag","foto_produto",
+]
 EC_COLS_18 = [
     "order","created_at","customer_name","state","status","utmsource",
     "marketingtags","payment_method","installments","quantity_sku","phone",
     "sku","product_name","sku_selling_price","sku_total_price",
     "discount_tags","brand","livelo_tag",
+]
+EC_COLS_18F = [
+    "order","created_at","customer_name","state","status","utmsource",
+    "payment_method","installments","quantity_sku","phone",
+    "sku","product_name","sku_selling_price","sku_total_price",
+    "discount_tags","brand","livelo_tag","foto_produto",
 ]
 EC_COLS_17 = [
     "order","created_at","customer_name","state","status","utmsource",
@@ -104,8 +134,9 @@ def _ec_colnames(text: str) -> list:
     first = text.split("\n")[0]
     import csv as _csv
     ncols = len(list(_csv.reader([first]))[0])
-    if ncols >= 18:
-        return EC_COLS_18
+    if ncols >= 19: return EC_COLS_19
+    if ncols == 18: return EC_COLS_18
+    if ncols == 17: return EC_COLS_17
     return EC_COLS_17
 
 _BL = dict(
@@ -246,9 +277,15 @@ def prep_mp(raw: pd.DataFrame) -> pd.DataFrame:
 def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.copy()
 
-    expected_cols = EC_COLS_18 if len(df.columns) >= 18 else EC_COLS_17
-    if len(df.columns) == len(expected_cols):
-        df.columns = expected_cols
+    ncols = len(df.columns)
+    if ncols >= 19:
+        expected = EC_COLS_19
+    elif ncols == 18:
+        expected = EC_COLS_18
+    else:
+        expected = EC_COLS_17
+    if len(df.columns) == len(expected):
+        df.columns = expected
 
     def safe_num(s):
         return pd.to_numeric(
@@ -275,6 +312,17 @@ def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
     df["utmsource"]  = df["utmsource"].replace("", np.nan).fillna("Direto").astype(str).str.strip()
     df["order"]      = df["order"].astype(str).str.strip()
     df["brand"]      = df["brand"].astype(str).str.strip()
+
+    if "foto_produto" in df.columns:
+        df["foto_produto"] = df["foto_produto"].astype(str).str.strip()
+        df["img_url"] = df["foto_produto"].apply(
+            lambda u: u if u.startswith("http") else ""
+        )
+    else:
+        df["img_url"] = (
+            IMG_BASE_URL + "/" + df["brand"] + "/Baixa/" + df["sku"] + IMG_EXT
+        )
+
     df = df.dropna(subset=["data"])
     return df
 
@@ -822,7 +870,12 @@ with tab_prod:
 
     prod = (
         df_s.groupby(["brand", "sku", "product_name"])
-        .agg(qty=("quantity_sku", "sum"), orders=("order", "nunique"), receita=("line_total", "sum"))
+        .agg(
+            qty=("quantity_sku", "sum"),
+            orders=("order", "nunique"),
+            receita=("line_total", "sum"),
+            img_url=("img_url", "first"),
+        )
         .reset_index()
         .sort_values("qty", ascending=False)
     )
@@ -924,16 +977,77 @@ with tab_prod:
         )
         st.plotly_chart(fig_par, use_container_width=True)
 
-    sh("Tabela Detalhada por SKU e Marca")
-    prod_disp = prod.copy()
-    prod_disp["receita"] = prod_disp["receita"].map(brl)
-    prod_disp = prod_disp.rename(columns={
-        "brand": "Marca", "sku": "SKU", "product_name": "Produto",
-        "qty": "Qtd Vendida", "orders": "Pedidos", "receita": "Receita Est.",
-    })
-    cols_show = ["Marca", "SKU", "Produto", "Qtd Vendida", "Pedidos", "Receita Est."]
-    st.dataframe(prod_disp[[c for c in cols_show if c in prod_disp.columns]],
-                 use_container_width=True, hide_index=True)
+    sh("Tabela de SKUs com Imagens")
+
+    def img_or_placeholder(url: str) -> str:
+        url = str(url).strip()
+        if url.startswith("http"):
+            return (
+                f"<img src='{url}' "
+                f"onerror=\"this.style.display='none';this.nextElementSibling.style.display='flex';\" "
+                f"style='max-height:150px;max-width:100%;object-fit:contain;'/>"
+                f"<div class='prod-img-placeholder' style='display:none;'>⌚</div>"
+            )
+        return "<div class='prod-img-placeholder'>⌚</div>"
+
+    prod_sorted = prod.sort_values(["brand", "qty"], ascending=[True, False]).reset_index(drop=True)
+
+    filter_col, _ = st.columns([3, 1])
+    with filter_col:
+        marcas_grid = sorted(prod_sorted["brand"].unique().tolist())
+        marca_filter = st.multiselect(
+            "Filtrar marca na tabela", marcas_grid, default=marcas_grid, key="img_marca"
+        )
+    prod_grid = prod_sorted[prod_sorted["brand"].isin(marca_filter)] if marca_filter else prod_sorted
+
+    for marca, grupo in prod_grid.groupby("brand", sort=False):
+        cor = COR_MARCA.get(marca, "#3b6fff")
+        st.markdown(
+            f"<div style='font-size:.75rem;font-weight:700;color:{cor};"
+            f"text-transform:uppercase;letter-spacing:.1em;margin:18px 0 10px;'>{marca}</div>",
+            unsafe_allow_html=True,
+        )
+        cards_html = "<div class='prod-grid'>"
+        for _, row in grupo.iterrows():
+            img_url     = str(row.get("img_url", "")).strip()
+            receita_fmt = brl(row["receita"])
+            badge_color = cor
+            cards_html += f"""
+            <div class="prod-card">
+              <div class="prod-img-wrap">
+                {img_or_placeholder(img_url)}
+              </div>
+              <div class="prod-info">
+                <span class="prod-badge" style="background:{badge_color}22;color:{badge_color};border:1px solid {badge_color}44;">{row['brand']}</span>
+                <div class="prod-name">{row['product_name']}</div>
+                <div class="prod-sku">{row['sku']}</div>
+                <div class="prod-stats">
+                  <div class="prod-stat">
+                    <span class="prod-stat-label">Unidades</span>
+                    <span class="prod-stat-val">{row['qty']:,}</span>
+                  </div>
+                  <div class="prod-stat">
+                    <span class="prod-stat-label">Pedidos</span>
+                    <span class="prod-stat-val">{row['orders']:,}</span>
+                  </div>
+                  <div class="prod-stat">
+                    <span class="prod-stat-label">Receita Est.</span>
+                    <span class="prod-stat-val" style="font-size:.75rem;">{receita_fmt}</span>
+                  </div>
+                </div>
+              </div>
+            </div>"""
+        cards_html += "</div>"
+        st.markdown(cards_html, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='info'>🔗 <strong>URL de imagem:</strong> "
+        f"<code>{IMG_BASE_URL}/{{Marca}}/Baixa/{{SKU}}{IMG_EXT}</code> — "
+        f"construída a partir das colunas <code>brand</code> e <code>sku</code>, "
+        f"ou lida diretamente da coluna <code>foto_produto</code> quando presente na planilha.</div>",
+        unsafe_allow_html=True,
+    )
     st.download_button("📥 Exportar SKUs por Marca",
                        data=prod.to_csv(index=False).encode("utf-8"),
                        file_name="skus_marca.csv", mime="text/csv")
