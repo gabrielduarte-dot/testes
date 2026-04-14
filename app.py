@@ -259,6 +259,7 @@ def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
         ["faturado","aprovado","entregue","complete","paid","concluido","concluído"])
     df["cancelado"]  = df["status"].str.lower().isin(
         ["cancelado","cancelada","canceled","cancelled","devolvido","devolvida","returned","recusado"])
+    df["livelo"]     = df["livelo_tag"].astype(str).str.strip().str.lower() == "livelo"
     df["utmsource"]  = df["utmsource"].replace("", np.nan).fillna("Direto").astype(str).str.strip()
     df["order"]      = df["order"].astype(str).str.strip()
     df["brand"]      = df["brand"].astype(str).str.strip()
@@ -493,38 +494,25 @@ with tab_geral:
             f"<strong>{n_fat/n_tot*100:.1f}%</strong> — {n_pend} pedido(s) pendente(s)</div>",
             unsafe_allow_html=True)
 
-    if has_ec and not df_ec.empty:
+    if not mp_ecom_all.empty:
         sh("Resumo por Marca")
-        marcas_resumo = sorted(df_ec["brand"].dropna().unique().tolist())
-        cols_rc = st.columns(max(len(marcas_resumo), 1))
-        ec_all_p = fdt(df_ec, data_ini, data_fim)
-        for idx, marca in enumerate(marcas_resumo):
-            df_m = ec_all_p[ec_all_p["brand"] == marca] if not ec_all_p.empty else pd.DataFrame()
-            df_m_dedup  = df_m.drop_duplicates("order") if not df_m.empty else pd.DataFrame()
-            clientes    = int(df_m["customer_name"].nunique()) if not df_m.empty and "customer_name" in df_m.columns else 0
-            total_itens = int(df_m["quantity_sku"].sum()) if not df_m.empty else 0
-            fat_itens   = int(df_m[df_m["faturado"]]["quantity_sku"].sum()) if not df_m.empty else 0
-            canc_itens  = int(df_m[df_m["cancelado"]]["quantity_sku"].sum()) if not df_m.empty else 0
-            taxa_canc   = canc_itens / total_itens * 100 if total_itens > 0 else 0
-            ec_marca_nf = ec_p[ec_p["marca"] == marca] if not ec_p.empty and "marca" in ec_p.columns else pd.DataFrame()
-            receita_nf  = float(ec_marca_nf["receita"].sum()) if not ec_marca_nf.empty else 0
+        MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
+        cols_rc = st.columns(len(MARCAS_ECOM))
+        for idx, marca in enumerate(MARCAS_ECOM):
+            df_m = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
+            notas    = int(df_m["nota"].nunique()) if not df_m.empty else 0
+            itens    = int(df_m["itens"].round().sum()) if not df_m.empty else 0
+            receita  = float(df_m["receita"].sum()) if not df_m.empty else 0
+            ticket   = receita / notas if notas > 0 else 0
             cor = COR_MARCA.get(marca, "#3b6fff")
-            if taxa_canc <= 5:
-                badge_cls = "rc-green"
-            elif taxa_canc <= 12:
-                badge_cls = "rc-amber"
-            else:
-                badge_cls = "rc-red"
             with cols_rc[idx]:
                 st.markdown(f"""
                 <div class="rc">
                   <p class="rc-title" style="color:{cor};">{marca}</p>
-                  <div class="rc-row"><span>Clientes únicos</span><span class="rc-val">{clientes:,}</span></div>
-                  <div class="rc-row"><span>Total de itens</span><span class="rc-val">{total_itens:,}</span></div>
-                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{fat_itens:,}</span></span></div>
-                  <div class="rc-row"><span>Itens cancelados</span><span class="rc-val"><span class="rc-badge rc-red">{canc_itens:,}</span></span></div>
-                  <div class="rc-row"><span>Taxa de cancelamento</span><span class="rc-val"><span class="rc-badge {badge_cls}">{taxa_canc:.1f}%</span></span></div>
-                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita_nf)}</span></div>
+                  <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
+                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
+                  <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
+                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -796,6 +784,8 @@ with tab_prod:
         st.stop()
 
     df_fp   = fdt(df_ec, data_ini, data_fim)
+    if not df_fp.empty:
+        df_fp = df_fp[~df_fp["livelo"]].copy()
     df_fat2 = df_fp[df_fp["faturado"]].copy() if not df_fp.empty else pd.DataFrame()
 
     if df_fat2.empty:
@@ -804,73 +794,74 @@ with tab_prod:
 
     st.markdown(
         "<div class='info'>ℹ️ Ranking calculado a partir de <code>sku_selling_price × quantity_sku</code> "
-        "da planilha E-commerce, agrupado por <strong>marca (brand/seller)</strong>. "
+        "da planilha E-commerce, agrupado por <strong>marca (coluna brand/seller)</strong>. "
+        "Pedidos do canal Livelo excluídos. "
         "A receita oficial está nas abas E-commerce e Marketplace.</div>",
         unsafe_allow_html=True)
 
-    pf1, pf2 = st.columns([3,1])
+    pf1, pf2 = st.columns([3, 1])
     with pf1:
         sellers_d = sorted(df_fat2["brand"].dropna().unique().tolist())
         sellers_s = st.multiselect("Filtrar por Marca / Seller", sellers_d, default=sellers_d, key="pm")
     with pf2:
-        top_n = st.selectbox("Top N por marca", [5,10,15,20], index=1, key="tn")
+        top_n = st.selectbox("Top N por marca", [5, 10, 15, 20], index=1, key="tn")
 
     df_s = df_fat2[df_fat2["brand"].isin(sellers_s)] if sellers_s else df_fat2
 
     prod = (
-        df_s.groupby(["brand","sku","product_name"])
-        .agg(qty=("quantity_sku","sum"), orders=("order","nunique"), receita=("line_total","sum"))
+        df_s.groupby(["brand", "sku", "product_name"])
+        .agg(qty=("quantity_sku", "sum"), orders=("order", "nunique"), receita=("line_total", "sum"))
         .reset_index()
         .sort_values("qty", ascending=False)
     )
     prod["qty"]    = prod["qty"].round().astype(int)
     prod["orders"] = prod["orders"].astype(int)
 
-    sh("Top por Quantidade Vendida — por Marca")
     marcas_ativas = prod["brand"].unique().tolist()
     ncols = min(len(marcas_ativas), 4)
+
     if ncols > 0:
-        cols_brand = st.columns(ncols)
+        sh("Top por Quantidade Vendida — por Marca (Seller)")
+        cols_b1 = st.columns(ncols)
         for idx, marca in enumerate(marcas_ativas):
             df_marca = prod[prod["brand"] == marca].sort_values("qty", ascending=False).head(top_n)
             cor = COR_MARCA.get(marca, "#3b6fff")
-            with cols_brand[idx % ncols]:
+            with cols_b1[idx % ncols]:
                 st.markdown(f"<div style='font-size:.8rem;font-weight:700;color:{cor};margin-bottom:6px;'>{marca}</div>", unsafe_allow_html=True)
                 fig_bm = px.bar(df_marca, x="qty", y="product_name", orientation="h",
-                                labels={"qty":"Unidades","product_name":""},
+                                labels={"qty": "Unidades", "product_name": ""},
                                 color_discrete_sequence=[cor])
                 fig_bm.update_layout(**Li(
-                    margin=dict(l=10,r=10,t=10,b=10),
+                    margin=dict(l=10, r=10, t=10, b=10),
                     height=max(200, min(top_n * 38, 420)),
                     showlegend=False,
                 ))
                 st.plotly_chart(fig_bm, use_container_width=True)
 
-    sh("Top por Receita Estimada — por Marca")
-    if ncols > 0:
-        cols_brand2 = st.columns(ncols)
+        sh("Top por Receita Estimada — por Marca (Seller)")
+        cols_b2 = st.columns(ncols)
         for idx, marca in enumerate(marcas_ativas):
             df_marca2 = prod[prod["brand"] == marca].sort_values("receita", ascending=False).head(top_n)
             cor = COR_MARCA.get(marca, "#3b6fff")
-            with cols_brand2[idx % ncols]:
+            with cols_b2[idx % ncols]:
                 st.markdown(f"<div style='font-size:.8rem;font-weight:700;color:{cor};margin-bottom:6px;'>{marca}</div>", unsafe_allow_html=True)
                 fig_bm2 = px.bar(df_marca2, x="receita", y="product_name", orientation="h",
-                                 labels={"receita":"Receita Est. (R$)","product_name":""},
+                                 labels={"receita": "Receita Est. (R$)", "product_name": ""},
                                  color_discrete_sequence=[cor])
                 fig_bm2.update_layout(**Li(
-                    margin=dict(l=10,r=10,t=10,b=10),
+                    margin=dict(l=10, r=10, t=10, b=10),
                     height=max(200, min(top_n * 38, 420)),
                     showlegend=False,
                 ))
                 st.plotly_chart(fig_bm2, use_container_width=True)
 
     sh("Volume Total de Itens por Marca")
-    seller_qty = prod.groupby("brand")[["qty","receita"]].sum().reset_index().sort_values("qty", ascending=False)
+    seller_qty = prod.groupby("brand")[["qty", "receita"]].sum().reset_index().sort_values("qty", ascending=False)
     sq1, sq2 = st.columns(2)
     with sq1:
         fig_sq = px.bar(seller_qty, x="brand", y="qty",
                         color="brand", color_discrete_map=COR_MARCA,
-                        labels={"qty":"Unidades Vendidas","brand":""},
+                        labels={"qty": "Unidades Vendidas", "brand": ""},
                         text=seller_qty["qty"].astype(str))
         fig_sq.update_traces(textposition="outside")
         fig_sq.update_layout(**L())
@@ -879,38 +870,44 @@ with tab_prod:
         fig_sqp = px.pie(seller_qty, names="brand", values="qty",
                          color="brand", color_discrete_map=COR_MARCA, hole=0.55)
         fig_sqp.update_traces(textinfo="percent+label", textfont_size=11)
-        fig_sqp.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+        fig_sqp.update_layout(**L(margin=dict(l=10, r=10, t=30, b=10)))
         st.plotly_chart(fig_sqp, use_container_width=True)
 
-    sh("Curva de Pareto — Volume de Unidades")
-    p80 = prod.sort_values("qty", ascending=False).copy()
+    sh("Curva de Pareto — Top 15 Produtos por Volume")
+    p80 = prod.sort_values("qty", ascending=False).head(15).copy()
     total_qty = p80["qty"].sum()
     if total_qty > 0:
-        p80["cum_pct"] = p80["qty"].cumsum() / total_qty * 100
-        n80 = int((p80["cum_pct"] <= 80).sum()) + 1
-        pct_cat = n80 / len(p80) * 100 if len(p80) > 0 else 0
+        p80["cum_pct"] = p80["qty"].cumsum() / prod["qty"].sum() * 100
+        n80 = int((prod.sort_values("qty", ascending=False)["qty"].cumsum() / prod["qty"].sum() * 100 <= 80).sum()) + 1
+        pct_cat = n80 / len(prod) * 100 if len(prod) > 0 else 0
         st.markdown(
-            f"<div class='info'>📐 <strong>Pareto:</strong> "
+            f"<div class='info'>📐 <strong>Pareto (catálogo completo):</strong> "
             f"<strong>{n80} produto(s) ({pct_cat:.0f}% do catálogo)</strong> "
-            f"representam 80% do volume de unidades vendidas.</div>",
+            f"representam 80% do volume de unidades vendidas. "
+            f"Exibindo top 15 no gráfico.</div>",
             unsafe_allow_html=True)
         fig_par = go.Figure()
         fig_par.add_trace(go.Bar(
-            x=p80["product_name"].str[:45], y=p80["qty"],
-            marker_color=[COR_MARCA.get(b,"#3b6fff") for b in p80["brand"]],
-            name="Unidades", opacity=0.85,
+            x=p80["product_name"].str[:50],
+            y=p80["qty"],
+            marker_color="#3b6fff",
+            name="Unidades",
+            opacity=0.85,
         ))
         fig_par.add_trace(go.Scatter(
-            x=p80["product_name"].str[:45], y=p80["cum_pct"],
-            mode="lines+markers", name="% Acumulado",
-            line=dict(color="#f59e0b", width=2), yaxis="y2",
+            x=p80["product_name"].str[:50],
+            y=p80["cum_pct"],
+            mode="lines+markers",
+            name="% Acumulado (sobre total)",
+            line=dict(color="#f59e0b", width=2),
+            yaxis="y2",
         ))
         fig_par.add_hline(y=80, line_dash="dot", line_color="#f43f5e",
                           yref="y2", annotation_text="80%",
                           annotation=dict(font_color="#f43f5e"))
         fig_par.update_layout(
             **L(), xaxis_tickangle=-30,
-            yaxis2=dict(overlaying="y", side="right", range=[0,105], ticksuffix="%",
+            yaxis2=dict(overlaying="y", side="right", range=[0, 105], ticksuffix="%",
                         gridcolor="rgba(0,0,0,0)", tickcolor="#1e2d4a", linecolor="#1e2d4a"),
         )
         st.plotly_chart(fig_par, use_container_width=True)
@@ -919,10 +916,10 @@ with tab_prod:
     prod_disp = prod.copy()
     prod_disp["receita"] = prod_disp["receita"].map(brl)
     prod_disp = prod_disp.rename(columns={
-        "brand":"Marca","sku":"SKU","product_name":"Produto",
-        "qty":"Qtd Vendida","orders":"Pedidos","receita":"Receita Est.",
+        "brand": "Marca", "sku": "SKU", "product_name": "Produto",
+        "qty": "Qtd Vendida", "orders": "Pedidos", "receita": "Receita Est.",
     })
-    cols_show = ["Marca","SKU","Produto","Qtd Vendida","Pedidos","Receita Est."]
+    cols_show = ["Marca", "SKU", "Produto", "Qtd Vendida", "Pedidos", "Receita Est."]
     st.dataframe(prod_disp[[c for c in cols_show if c in prod_disp.columns]],
                  use_container_width=True, hide_index=True)
     st.download_button("📥 Exportar SKUs por Marca",
