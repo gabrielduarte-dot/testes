@@ -87,12 +87,26 @@ COR_MP = {
     "Amazon":        "#fb923c",
     "Outros":        "#64748b",
 }
-EC_COLS = [
+EC_COLS_18 = [
     "order","created_at","customer_name","state","status","utmsource",
     "marketingtags","payment_method","installments","quantity_sku","phone",
     "sku","product_name","sku_selling_price","sku_total_price",
     "discount_tags","brand","livelo_tag",
 ]
+EC_COLS_17 = [
+    "order","created_at","customer_name","state","status","utmsource",
+    "payment_method","installments","quantity_sku","phone",
+    "sku","product_name","sku_selling_price","sku_total_price",
+    "discount_tags","brand","livelo_tag",
+]
+
+def _ec_colnames(text: str) -> list:
+    first = text.split("\n")[0]
+    import csv as _csv
+    ncols = len(list(_csv.reader([first]))[0])
+    if ncols >= 18:
+        return EC_COLS_18
+    return EC_COLS_17
 
 _BL = dict(
     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -160,7 +174,8 @@ def load_url(url, tipo):
 
 def parse_csv(text, tipo):
     if tipo == "ec":
-        return pd.read_csv(StringIO(text), header=None, names=EC_COLS,
+        cols = _ec_colnames(text)
+        return pd.read_csv(StringIO(text), header=None, names=cols,
                            dtype=str, keep_default_na=False, na_values=[""])
     return pd.read_csv(StringIO(text), dtype=str, keep_default_na=False, na_values=[""])
 
@@ -231,12 +246,9 @@ def prep_mp(raw: pd.DataFrame) -> pd.DataFrame:
 def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.copy()
 
-    if len(df.columns) == len(EC_COLS):
-        df.columns = EC_COLS
-    else:
-        for i, col in enumerate(EC_COLS):
-            if i < len(df.columns):
-                df.columns.values[i] = col
+    expected_cols = EC_COLS_18 if len(df.columns) >= 18 else EC_COLS_17
+    if len(df.columns) == len(expected_cols):
+        df.columns = expected_cols
 
     def safe_num(s):
         return pd.to_numeric(
@@ -366,7 +378,7 @@ with st.expander("⚙️  Fontes de Dados", expanded=not has_mp):
     with c3:
         st.markdown("**📥 Templates**")
         tpl_mp = "DATA,NOTA,QUANTIDADE,VALOR,MARKETPLACE\n01/04/2026,NF001,1,\"269,10\",Livelo\n01/04/2026,NF002,2,\"350,00\",Site Seculus\n01/04/2026,NF003,1,\"180,00\",Multimarcas\n01/04/2026,NF004,1,\"450,00\",Site Mondaine"
-        tpl_ec = ",".join(EC_COLS)+"\nPED001,2026-04-01 10:00:00Z,Cliente,SP,Faturado,google-shopping,,Pix,1,1,,SKU001,Relógio Slim,350.00,350.00,,Seculus,"
+        tpl_ec = ",".join(EC_COLS_17)+"\nPED001,2026-04-01 10:00:00Z,Cliente,SP,Faturado,google-shopping,Pix,1,1,,SKU001,Relógio Slim,350.00,350.00,,Seculus,"
         st.download_button("⬇️ Template NF", data=tpl_mp, file_name="template_nf.csv",
                            mime="text/csv", use_container_width=True)
         st.download_button("⬇️ Template EC", data=tpl_ec, file_name="template_ec.csv",
