@@ -46,6 +46,15 @@ hr{border-color:#1a2540!important;}
 .zone{background:linear-gradient(135deg,#0f1421,#111827);border:1px dashed #2a3a5a;border-radius:16px;padding:40px;text-align:center;}
 .zone h3{color:#f1f5f9!important;margin-bottom:8px!important;}
 .zone p{color:#64748b;font-size:.88rem;}
+.rc{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:14px;padding:20px 22px;}
+.rc-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin:0 0 14px 0;}
+.rc-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1a2540;font-size:.83rem;color:#94a3b8;}
+.rc-row:last-child{border-bottom:none;}
+.rc-val{font-family:'DM Mono',monospace;color:#f1f5f9;font-weight:600;font-size:.88rem;}
+.rc-badge{padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:700;font-family:'DM Mono',monospace;}
+.rc-green{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.25);}
+.rc-red{background:rgba(244,63,94,.15);color:#fb7185;border:1px solid rgba(244,63,94,.25);}
+.rc-amber{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.25);}
 </style>
 """, unsafe_allow_html=True)
 
@@ -248,6 +257,8 @@ def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
     df["status"]     = df["status"].astype(str).str.strip()
     df["faturado"]   = df["status"].str.lower().isin(
         ["faturado","aprovado","entregue","complete","paid","concluido","concluído"])
+    df["cancelado"]  = df["status"].str.lower().isin(
+        ["cancelado","cancelada","canceled","cancelled","devolvido","devolvida","returned","recusado"])
     df["utmsource"]  = df["utmsource"].replace("", np.nan).fillna("Direto").astype(str).str.strip()
     df["order"]      = df["order"].astype(str).str.strip()
     df["brand"]      = df["brand"].astype(str).str.strip()
@@ -482,6 +493,41 @@ with tab_geral:
             f"<strong>{n_fat/n_tot*100:.1f}%</strong> — {n_pend} pedido(s) pendente(s)</div>",
             unsafe_allow_html=True)
 
+    if has_ec and not df_ec.empty:
+        sh("Resumo por Marca")
+        marcas_resumo = sorted(df_ec["brand"].dropna().unique().tolist())
+        cols_rc = st.columns(max(len(marcas_resumo), 1))
+        ec_all_p = fdt(df_ec, data_ini, data_fim)
+        for idx, marca in enumerate(marcas_resumo):
+            df_m = ec_all_p[ec_all_p["brand"] == marca] if not ec_all_p.empty else pd.DataFrame()
+            df_m_dedup  = df_m.drop_duplicates("order") if not df_m.empty else pd.DataFrame()
+            clientes    = int(df_m["customer_name"].nunique()) if not df_m.empty and "customer_name" in df_m.columns else 0
+            total_itens = int(df_m["quantity_sku"].sum()) if not df_m.empty else 0
+            fat_itens   = int(df_m[df_m["faturado"]]["quantity_sku"].sum()) if not df_m.empty else 0
+            canc_itens  = int(df_m[df_m["cancelado"]]["quantity_sku"].sum()) if not df_m.empty else 0
+            taxa_canc   = canc_itens / total_itens * 100 if total_itens > 0 else 0
+            ec_marca_nf = ec_p[ec_p["marca"] == marca] if not ec_p.empty and "marca" in ec_p.columns else pd.DataFrame()
+            receita_nf  = float(ec_marca_nf["receita"].sum()) if not ec_marca_nf.empty else 0
+            cor = COR_MARCA.get(marca, "#3b6fff")
+            if taxa_canc <= 5:
+                badge_cls = "rc-green"
+            elif taxa_canc <= 12:
+                badge_cls = "rc-amber"
+            else:
+                badge_cls = "rc-red"
+            with cols_rc[idx]:
+                st.markdown(f"""
+                <div class="rc">
+                  <p class="rc-title" style="color:{cor};">{marca}</p>
+                  <div class="rc-row"><span>Clientes únicos</span><span class="rc-val">{clientes:,}</span></div>
+                  <div class="rc-row"><span>Total de itens</span><span class="rc-val">{total_itens:,}</span></div>
+                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{fat_itens:,}</span></span></div>
+                  <div class="rc-row"><span>Itens cancelados</span><span class="rc-val"><span class="rc-badge rc-red">{canc_itens:,}</span></span></div>
+                  <div class="rc-row"><span>Taxa de cancelamento</span><span class="rc-val"><span class="rc-badge {badge_cls}">{taxa_canc:.1f}%</span></span></div>
+                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita_nf)}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
+
     col_ev, col_sh = st.columns([3, 1])
     with col_ev:
         sh("Evolução de Receita")
@@ -540,21 +586,23 @@ with tab_geral:
         sh("UTM Source — Pedidos Faturados E-commerce")
         utm_g = (ec_fat.drop_duplicates("order")
                  .groupby("utmsource").agg(pedidos=("order","count")).reset_index()
-                 .sort_values("pedidos", ascending=False))
+                 .sort_values("pedidos", ascending=False)
+                 .head(10))
         utm_g["pct"] = utm_g["pedidos"] / utm_g["pedidos"].sum() * 100
+        utm_colors = [COR_UTM.get(s, "#64748b") for s in utm_g["utmsource"]]
         ug1, ug2 = st.columns([2,1])
         with ug1:
             fig_utm = px.bar(utm_g, x="utmsource", y="pedidos",
-                             color="utmsource", color_discrete_map=COR_UTM,
                              labels={"pedidos":"Pedidos Faturados","utmsource":"UTM Source"},
                              text=utm_g["pedidos"].astype(str)+" ("+utm_g["pct"].map("{:.0f}%".format)+")")
-            fig_utm.update_traces(textposition="outside")
+            fig_utm.update_traces(textposition="outside",
+                                  marker_color=utm_colors)
             fig_utm.update_layout(**L())
             st.plotly_chart(fig_utm, use_container_width=True)
         with ug2:
-            fig_utmp = px.pie(utm_g, names="utmsource", values="pedidos",
-                              color="utmsource", color_discrete_map=COR_UTM, hole=0.58)
-            fig_utmp.update_traces(textinfo="percent+label", textfont_size=11)
+            fig_utmp = px.pie(utm_g, names="utmsource", values="pedidos", hole=0.58)
+            fig_utmp.update_traces(textinfo="percent+label", textfont_size=11,
+                                   marker=dict(colors=utm_colors))
             fig_utmp.update_layout(**L(margin=dict(l=5,r=5,t=30,b=5)))
             st.plotly_chart(fig_utmp, use_container_width=True)
 
@@ -620,23 +668,29 @@ with tab_ec_tab:
         sh("Status dos Pedidos (Planilha E-commerce)")
         if not ec_p_ec.empty:
             ec_dedup = ec_p_ec.drop_duplicates("order")
-            st_cnt   = ec_dedup["faturado"].map({True:"Faturado",False:"Pendente"}).value_counts().reset_index()
-            st_cnt.columns = ["status","qtd"]
+            n_fat_ec  = int(ec_dedup["faturado"].sum())
+            n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
+            st_rows = []
+            if n_fat_ec  > 0: st_rows.append({"status":"Faturado",  "qtd":n_fat_ec})
+            if n_canc_ec > 0: st_rows.append({"status":"Cancelado", "qtd":n_canc_ec})
+            st_cnt = pd.DataFrame(st_rows) if st_rows else pd.DataFrame(columns=["status","qtd"])
             sv1, sv2 = st.columns(2)
             with sv1:
-                fig_st = px.pie(st_cnt, names="status", values="qtd",
-                                color="status",
-                                color_discrete_map={"Faturado":"#10b981","Pendente":"#f59e0b"},
-                                hole=0.58)
-                fig_st.update_traces(textinfo="percent+label", textfont_size=11)
-                fig_st.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
-                st.plotly_chart(fig_st, use_container_width=True)
+                if not st_cnt.empty:
+                    fig_st = px.pie(st_cnt, names="status", values="qtd",
+                                    color="status",
+                                    color_discrete_map={"Faturado":"#10b981","Cancelado":"#f43f5e"},
+                                    hole=0.58)
+                    fig_st.update_traces(textinfo="percent+label", textfont_size=11)
+                    fig_st.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+                    st.plotly_chart(fig_st, use_container_width=True)
             with sv2:
                 sh("UTM Source — Pedidos Faturados")
                 if not ec_fat.empty:
                     utm_t = (ec_fat.drop_duplicates("order")
                              .groupby("utmsource").agg(pedidos=("order","count")).reset_index()
-                             .sort_values("pedidos", ascending=False))
+                             .sort_values("pedidos", ascending=False)
+                             .head(10))
                     utm_t["pct"] = (utm_t["pedidos"]/utm_t["pedidos"].sum()*100).map("{:.1f}%".format)
                     st.dataframe(
                         utm_t.rename(columns={"utmsource":"UTM Source","pedidos":"Pedidos Fat.","pct":"Share"}),
@@ -741,7 +795,7 @@ with tab_prod:
         st.info("Carregue a planilha E-commerce para visualizar o ranking de produtos.")
         st.stop()
 
-    df_fp  = fdt(df_ec, data_ini, data_fim)
+    df_fp   = fdt(df_ec, data_ini, data_fim)
     df_fat2 = df_fp[df_fp["faturado"]].copy() if not df_fp.empty else pd.DataFrame()
 
     if df_fat2.empty:
@@ -750,16 +804,16 @@ with tab_prod:
 
     st.markdown(
         "<div class='info'>ℹ️ Ranking calculado a partir de <code>sku_selling_price × quantity_sku</code> "
-        "da planilha E-commerce, agrupado por <strong>seller (brand)</strong>. "
+        "da planilha E-commerce, agrupado por <strong>marca (brand/seller)</strong>. "
         "A receita oficial está nas abas E-commerce e Marketplace.</div>",
         unsafe_allow_html=True)
 
     pf1, pf2 = st.columns([3,1])
     with pf1:
         sellers_d = sorted(df_fat2["brand"].dropna().unique().tolist())
-        sellers_s = st.multiselect("Filtrar por Seller / Marca", sellers_d, default=sellers_d, key="pm")
+        sellers_s = st.multiselect("Filtrar por Marca / Seller", sellers_d, default=sellers_d, key="pm")
     with pf2:
-        top_n = st.selectbox("Top N", [5,10,15,20], index=1, key="tn")
+        top_n = st.selectbox("Top N por marca", [5,10,15,20], index=1, key="tn")
 
     df_s = df_fat2[df_fat2["brand"].isin(sellers_s)] if sellers_s else df_fat2
 
@@ -769,36 +823,66 @@ with tab_prod:
         .reset_index()
         .sort_values("qty", ascending=False)
     )
-    prod["qty"]     = prod["qty"].round().astype(int)
-    prod["orders"]  = prod["orders"].astype(int)
+    prod["qty"]    = prod["qty"].round().astype(int)
+    prod["orders"] = prod["orders"].astype(int)
 
-    pc1, pc2 = st.columns(2)
-    with pc1:
-        sh("Top por Quantidade Vendida (por Seller)")
-        fig_pq = px.bar(prod.head(top_n), x="qty", y="product_name", color="brand",
-                        orientation="h", color_discrete_map=COR_MARCA,
-                        labels={"qty":"Unidades","product_name":"","brand":"Seller"})
-        fig_pq.update_layout(**Li())
-        st.plotly_chart(fig_pq, use_container_width=True)
+    sh("Top por Quantidade Vendida — por Marca")
+    marcas_ativas = prod["brand"].unique().tolist()
+    ncols = min(len(marcas_ativas), 4)
+    if ncols > 0:
+        cols_brand = st.columns(ncols)
+        for idx, marca in enumerate(marcas_ativas):
+            df_marca = prod[prod["brand"] == marca].sort_values("qty", ascending=False).head(top_n)
+            cor = COR_MARCA.get(marca, "#3b6fff")
+            with cols_brand[idx % ncols]:
+                st.markdown(f"<div style='font-size:.8rem;font-weight:700;color:{cor};margin-bottom:6px;'>{marca}</div>", unsafe_allow_html=True)
+                fig_bm = px.bar(df_marca, x="qty", y="product_name", orientation="h",
+                                labels={"qty":"Unidades","product_name":""},
+                                color_discrete_sequence=[cor])
+                fig_bm.update_layout(**Li(
+                    margin=dict(l=10,r=10,t=10,b=10),
+                    height=max(200, min(top_n * 38, 420)),
+                    showlegend=False,
+                ))
+                st.plotly_chart(fig_bm, use_container_width=True)
 
-    with pc2:
-        sh("Top por Receita Estimada (por Seller)")
-        fig_pr = px.bar(prod.sort_values("receita",ascending=False).head(top_n),
-                        x="receita", y="product_name", color="brand",
-                        orientation="h", color_discrete_map=COR_MARCA,
-                        labels={"receita":"Receita Est. (R$)","product_name":"","brand":"Seller"})
-        fig_pr.update_layout(**Li())
-        st.plotly_chart(fig_pr, use_container_width=True)
+    sh("Top por Receita Estimada — por Marca")
+    if ncols > 0:
+        cols_brand2 = st.columns(ncols)
+        for idx, marca in enumerate(marcas_ativas):
+            df_marca2 = prod[prod["brand"] == marca].sort_values("receita", ascending=False).head(top_n)
+            cor = COR_MARCA.get(marca, "#3b6fff")
+            with cols_brand2[idx % ncols]:
+                st.markdown(f"<div style='font-size:.8rem;font-weight:700;color:{cor};margin-bottom:6px;'>{marca}</div>", unsafe_allow_html=True)
+                fig_bm2 = px.bar(df_marca2, x="receita", y="product_name", orientation="h",
+                                 labels={"receita":"Receita Est. (R$)","product_name":""},
+                                 color_discrete_sequence=[cor])
+                fig_bm2.update_layout(**Li(
+                    margin=dict(l=10,r=10,t=10,b=10),
+                    height=max(200, min(top_n * 38, 420)),
+                    showlegend=False,
+                ))
+                st.plotly_chart(fig_bm2, use_container_width=True)
 
-    sh("Receita Estimada por Seller")
-    seller_rec = prod.groupby("brand")["receita"].sum().reset_index().sort_values("receita", ascending=False)
-    fig_seller = px.pie(seller_rec, names="brand", values="receita",
-                        color="brand", color_discrete_map=COR_MARCA, hole=0.55)
-    fig_seller.update_traces(textinfo="percent+label", textfont_size=11)
-    fig_seller.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
-    st.plotly_chart(fig_seller, use_container_width=True)
+    sh("Volume Total de Itens por Marca")
+    seller_qty = prod.groupby("brand")[["qty","receita"]].sum().reset_index().sort_values("qty", ascending=False)
+    sq1, sq2 = st.columns(2)
+    with sq1:
+        fig_sq = px.bar(seller_qty, x="brand", y="qty",
+                        color="brand", color_discrete_map=COR_MARCA,
+                        labels={"qty":"Unidades Vendidas","brand":""},
+                        text=seller_qty["qty"].astype(str))
+        fig_sq.update_traces(textposition="outside")
+        fig_sq.update_layout(**L())
+        st.plotly_chart(fig_sq, use_container_width=True)
+    with sq2:
+        fig_sqp = px.pie(seller_qty, names="brand", values="qty",
+                         color="brand", color_discrete_map=COR_MARCA, hole=0.55)
+        fig_sqp.update_traces(textinfo="percent+label", textfont_size=11)
+        fig_sqp.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+        st.plotly_chart(fig_sqp, use_container_width=True)
 
-    sh("Curva de Pareto — Volume de Unidades por Seller")
+    sh("Curva de Pareto — Volume de Unidades")
     p80 = prod.sort_values("qty", ascending=False).copy()
     total_qty = p80["qty"].sum()
     if total_qty > 0:
@@ -831,31 +915,19 @@ with tab_prod:
         )
         st.plotly_chart(fig_par, use_container_width=True)
 
-    sh("Tabela Detalhada por SKU e Seller")
-    df_ant_fp  = fdt(df_ec, ini_ant, fim_ant)
-    df_ant_fat = df_ant_fp[df_ant_fp["faturado"]].copy() if not df_ant_fp.empty else pd.DataFrame()
-
-    if not df_ant_fat.empty:
-        ant_s = (df_ant_fat.groupby(["brand","sku"])["quantity_sku"].sum()
-                 .reset_index().rename(columns={"quantity_sku":"qty_ant"}))
-        prod = prod.merge(ant_s, on=["brand","sku"], how="left").fillna(0)
-        prod["var_qty"] = prod.apply(lambda r: fv(vp(r["qty"],r["qty_ant"])) or "—", axis=1)
-    else:
-        prod["var_qty"] = "—"
-
+    sh("Tabela Detalhada por SKU e Marca")
     prod_disp = prod.copy()
     prod_disp["receita"] = prod_disp["receita"].map(brl)
     prod_disp = prod_disp.rename(columns={
-        "brand":"Seller","sku":"SKU","product_name":"Produto",
+        "brand":"Marca","sku":"SKU","product_name":"Produto",
         "qty":"Qtd Vendida","orders":"Pedidos","receita":"Receita Est.",
-        "var_qty":"Var. Qtd vs Ant.",
     })
-    cols_show = ["Seller","SKU","Produto","Qtd Vendida","Pedidos","Receita Est.","Var. Qtd vs Ant."]
+    cols_show = ["Marca","SKU","Produto","Qtd Vendida","Pedidos","Receita Est."]
     st.dataframe(prod_disp[[c for c in cols_show if c in prod_disp.columns]],
                  use_container_width=True, hide_index=True)
-    st.download_button("📥 Exportar SKUs por Seller",
+    st.download_button("📥 Exportar SKUs por Marca",
                        data=prod.to_csv(index=False).encode("utf-8"),
-                       file_name="skus_seller.csv", mime="text/csv")
+                       file_name="skus_marca.csv", mime="text/csv")
 
 st.markdown("---")
 st.markdown(
