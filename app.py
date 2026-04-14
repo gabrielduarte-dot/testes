@@ -6,1308 +6,929 @@ from io import StringIO
 import requests
 from datetime import datetime, timedelta
 import numpy as np
+import json
 
-# ─────────────────────────────────────────────
-# PÁGINA
-# ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Dashboard · Grupo Seculus",
+    page_title="Dashboard de Vendas · Grupo Seculus",
     page_icon="⌚",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ─────────────────────────────────────────────
-# ESTILOS
-# ─────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Mono:wght@400;500&display=swap');
+html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
+.stApp{background-color:#080c14;color:#e2e8f0;}
+[data-testid="stSidebar"]{display:none;}
+[data-testid="stMetric"]{background:linear-gradient(135deg,#111827 0%,#131e35 100%);border:1px solid #1e2d4a;border-radius:14px;padding:20px 24px;transition:all .25s;}
+[data-testid="stMetric"]:hover{border-color:#3b6fff;box-shadow:0 0 20px rgba(59,111,255,.15);}
+[data-testid="stMetricLabel"]{color:#64748b!important;font-size:.73rem!important;font-weight:600!important;text-transform:uppercase;letter-spacing:.1em;}
+[data-testid="stMetricValue"]{color:#f1f5f9!important;font-size:1.55rem!important;font-weight:700!important;font-family:'DM Mono',monospace!important;}
+[data-testid="stMetricDelta"]{font-size:.8rem!important;}
+h1,h2,h3,h4{color:#f1f5f9!important;}
+h1{font-weight:700!important;letter-spacing:-.025em;}
+hr{border-color:#1a2540!important;}
+.stTabs [data-baseweb="tab-list"]{background:transparent!important;border-bottom:1px solid #1a2540!important;gap:0;padding:0;}
+.stTabs [data-baseweb="tab"]{color:#64748b!important;font-weight:500!important;font-size:.88rem!important;padding:10px 20px!important;border-radius:0!important;border-bottom:2px solid transparent!important;}
+.stTabs [aria-selected="true"]{color:#e2e8f0!important;border-bottom:2px solid #3b6fff!important;background:transparent!important;}
+.stTabs [data-baseweb="tab"]:hover{color:#94a3b8!important;background:rgba(59,111,255,.05)!important;}
+.stDataFrame{border:1px solid #1e2d4a!important;border-radius:12px!important;}
 
-*, html, body { box-sizing: border-box; }
-html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+.topbar{background:linear-gradient(90deg,#0d1321 0%,#111827 100%);border-bottom:1px solid #1a2540;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:60px;margin:-1rem -1rem 1.5rem -1rem;position:sticky;top:0;z-index:999;}
+.topbar-brand{display:flex;align-items:center;gap:10px;font-size:1rem;font-weight:700;color:#f1f5f9;letter-spacing:-.02em;}
+.topbar-brand span{color:#3b6fff;}
+.topnav{display:flex;align-items:center;gap:4px;}
+.nav-pill{padding:6px 16px;border-radius:8px;font-size:.82rem;font-weight:500;color:#64748b;cursor:pointer;transition:all .2s;border:1px solid transparent;text-decoration:none;white-space:nowrap;}
+.nav-pill:hover{color:#e2e8f0;background:rgba(59,111,255,.1);}
+.nav-pill.active{color:#fff;background:rgba(59,111,255,.2);border-color:#3b6fff;}
+.topbar-right{display:flex;align-items:center;gap:12px;font-size:.75rem;color:#475569;font-family:'DM Mono',monospace;}
+.dot-live{width:7px;height:7px;border-radius:50%;background:#10b981;display:inline-block;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
 
-/* ── App background ── */
-.stApp { background: #0a0b0f; color: #e2e4ea; }
-[data-testid="stAppViewContainer"] { background: #0a0b0f; }
-[data-testid="stHeader"] { background: transparent; }
-section[data-testid="stSidebar"] { display: none !important; }
+.section-header{display:flex;align-items:center;gap:10px;margin:24px 0 16px 0;}
+.section-header h3{margin:0!important;font-size:.95rem!important;font-weight:600!important;color:#94a3b8!important;text-transform:uppercase;letter-spacing:.08em;}
+.section-header .divider{flex:1;height:1px;background:linear-gradient(90deg,#1e2d4a,transparent);}
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: #0a0b0f; }
-::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 4px; }
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px;}
+.kpi-card{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:14px;padding:20px;transition:all .25s;cursor:default;}
+.kpi-card:hover{border-color:#3b6fff;box-shadow:0 0 20px rgba(59,111,255,.12);}
+.kpi-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:8px;}
+.kpi-value{font-size:1.5rem;font-weight:700;color:#f1f5f9;font-family:'DM Mono',monospace;line-height:1.1;}
+.kpi-delta{font-size:.78rem;margin-top:6px;font-family:'DM Mono',monospace;}
+.kpi-delta.up{color:#10b981;}
+.kpi-delta.down{color:#f43f5e;}
+.kpi-delta.neutral{color:#64748b;}
 
-/* ── Top navigation bar ── */
-.nav-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 32px;
-    background: rgba(14,15,20,0.95);
-    border-bottom: 1px solid #1e2030;
-    backdrop-filter: blur(12px);
-    position: sticky;
-    top: 0;
-    z-index: 999;
-    margin: -1rem -1rem 0 -1rem;
-}
-.nav-logo {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: #fff;
-    letter-spacing: -0.02em;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.nav-logo span { color: #6366f1; }
-.nav-tabs {
-    display: flex;
-    gap: 4px;
-    background: #13141a;
-    border: 1px solid #1e2030;
-    border-radius: 10px;
-    padding: 4px;
-}
-.nav-tab {
-    padding: 7px 18px;
-    border-radius: 7px;
-    font-size: .82rem;
-    font-weight: 500;
-    color: #6b7280;
-    cursor: pointer;
-    transition: all .2s;
-    border: none;
-    background: transparent;
-    font-family: 'DM Sans', sans-serif;
-    white-space: nowrap;
-}
-.nav-tab:hover { color: #e2e4ea; }
-.nav-tab.active {
-    background: #1e2030;
-    color: #fff;
-    box-shadow: 0 1px 4px rgba(0,0,0,.4);
-}
-.nav-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: .75rem;
-    font-family: 'IBM Plex Mono', monospace;
-    color: #3d4155;
-}
-.nav-dot { width: 6px; height: 6px; background: #22c55e; border-radius: 50%; display: inline-block; }
+.platform-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:6px;font-size:.75rem;font-weight:600;font-family:'DM Mono',monospace;}
+.badge-ec{background:rgba(59,111,255,.15);color:#6b9fff;border:1px solid rgba(59,111,255,.3);}
+.badge-mp{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3);}
+.badge-green{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3);}
+.badge-red{background:rgba(244,63,94,.15);color:#fb7185;border:1px solid rgba(244,63,94,.3);}
+.badge-gray{background:rgba(100,116,139,.15);color:#94a3b8;border:1px solid rgba(100,116,139,.2);}
 
-/* ── Page header ── */
-.page-header {
-    padding: 36px 0 24px 0;
-}
-.page-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 2rem;
-    font-weight: 800;
-    color: #fff;
-    margin: 0;
-    letter-spacing: -0.03em;
-}
-.page-subtitle {
-    font-size: .85rem;
-    color: #4b5268;
-    margin-top: 4px;
-    font-family: 'IBM Plex Mono', monospace;
-}
+.insight-card{background:linear-gradient(135deg,#0f1c35,#111e38);border:1px solid #1e3a5f;border-left:3px solid #3b6fff;border-radius:0 12px 12px 0;padding:14px 18px;margin:8px 0;font-size:.88rem;color:#93c5fd;line-height:1.6;}
+.warn-card{background:linear-gradient(135deg,#1a1505,#1f1a06);border:1px solid #3d2e00;border-left:3px solid #f59e0b;border-radius:0 12px 12px 0;padding:14px 18px;margin:8px 0;font-size:.88rem;color:#fde68a;line-height:1.6;}
+.alert-card{background:linear-gradient(135deg,#1a0510,#1f0614);border:1px solid #4a0d20;border-left:3px solid #f43f5e;border-radius:0 12px 12px 0;padding:14px 18px;margin:8px 0;font-size:.88rem;color:#fca5a5;line-height:1.6;}
 
-/* ── Period badge ── */
-.period-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: #13141a;
-    border: 1px solid #1e2030;
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: .78rem;
-    font-family: 'IBM Plex Mono', monospace;
-    color: #6b7280;
-}
-.period-badge strong { color: #e2e4ea; }
-.period-sep { color: #2a2d3a; }
+.upload-zone{background:linear-gradient(135deg,#0f1421,#111827);border:1px dashed #2a3a5a;border-radius:16px;padding:36px;text-align:center;}
+.upload-zone h3{color:#f1f5f9!important;margin-bottom:8px!important;}
+.upload-zone p{color:#64748b;font-size:.88rem;}
 
-/* ── KPI Cards ── */
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin: 20px 0;
-}
-.kpi-card {
-    background: #0e0f14;
-    border: 1px solid #1a1c28;
-    border-radius: 14px;
-    padding: 22px 24px;
-    position: relative;
-    overflow: hidden;
-    transition: border-color .2s, transform .15s;
-}
-.kpi-card:hover { border-color: #2d3050; transform: translateY(-1px); }
-.kpi-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--accent, #6366f1);
-    opacity: .6;
-}
-.kpi-label {
-    font-size: .72rem;
-    font-weight: 500;
-    color: #4b5268;
-    text-transform: uppercase;
-    letter-spacing: .1em;
-    margin-bottom: 10px;
-}
-.kpi-value {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.75rem;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.03em;
-    margin-bottom: 6px;
-}
-.kpi-delta {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: .72rem;
-}
-.kpi-delta.pos { color: #22c55e; }
-.kpi-delta.neg { color: #ef4444; }
-.kpi-delta.neu { color: #4b5268; }
+.filter-bar{background:linear-gradient(90deg,#0d1321,#111827);border:1px solid #1a2540;border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
 
-/* ── Section headers ── */
-.section-label {
-    font-family: 'Syne', sans-serif;
-    font-size: .72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .15em;
-    color: #4b5268;
-    margin: 32px 0 14px 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.section-label::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #1a1c28;
-}
-
-/* ── Platform pills ── */
-.platform-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: .75rem;
-    font-weight: 600;
-    font-family: 'IBM Plex Mono', monospace;
-}
-.pill-ec  { background: #1a1f3a; color: #818cf8; border: 1px solid #2d3468; }
-.pill-mp  { background: #1a2e1a; color: #4ade80; border: 1px solid #2d4a2d; }
-
-/* ── Chart containers ── */
-.chart-card {
-    background: #0e0f14;
-    border: 1px solid #1a1c28;
-    border-radius: 14px;
-    padding: 22px;
-    margin-bottom: 14px;
-}
-.chart-title {
-    font-family: 'Syne', sans-serif;
-    font-size: .88rem;
-    font-weight: 600;
-    color: #9ca3b8;
-    margin-bottom: 16px;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-}
-
-/* ── Upload area ── */
-.upload-area {
-    background: #0e0f14;
-    border: 1px dashed #2a2d3a;
-    border-radius: 14px;
-    padding: 32px;
-    text-align: center;
-    margin: 10px 0;
-}
-.upload-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 1rem;
-    font-weight: 700;
-    color: #fff;
-    margin-bottom: 6px;
-}
-.upload-sub {
-    font-size: .82rem;
-    color: #4b5268;
-    font-family: 'IBM Plex Mono', monospace;
-}
-
-/* ── Insight box ── */
-.insight {
-    background: #0d1020;
-    border-left: 2px solid #6366f1;
-    border-radius: 0 10px 10px 0;
-    padding: 12px 16px;
-    margin: 8px 0;
-    font-size: .85rem;
-    color: #9ba3c0;
-}
-.alert-r {
-    background: #130c0c;
-    border-left: 2px solid #ef4444;
-    border-radius: 0 10px 10px 0;
-    padding: 12px 16px;
-    margin: 6px 0;
-    font-size: .82rem;
-    color: #fca5a5;
-}
-.alert-y {
-    background: #130f08;
-    border-left: 2px solid #f59e0b;
-    border-radius: 0 10px 10px 0;
-    padding: 12px 16px;
-    margin: 6px 0;
-    font-size: .82rem;
-    color: #fde68a;
-}
-
-/* ── Data table overrides ── */
-[data-testid="stDataFrame"] {
-    border: 1px solid #1a1c28 !important;
-    border-radius: 10px !important;
-}
-iframe { border-radius: 10px; }
-
-/* ── Metric overrides ── */
-[data-testid="stMetric"] {
-    background: #0e0f14;
-    border: 1px solid #1a1c28;
-    border-radius: 12px;
-    padding: 16px 20px;
-}
-[data-testid="stMetricLabel"] { color: #4b5268 !important; font-size: .72rem !important; text-transform: uppercase; letter-spacing: .08em; }
-[data-testid="stMetricValue"] { color: #fff !important; font-family: 'Syne', sans-serif !important; font-size: 1.6rem !important; font-weight: 700 !important; }
-
-/* ── Tab bar (streamlit native) ── */
-[data-baseweb="tab-list"] { background: transparent !important; border-bottom: 1px solid #1a1c28 !important; gap: 0; }
-[data-baseweb="tab"] { color: #4b5268 !important; font-weight: 500 !important; font-family: 'DM Sans', sans-serif !important; padding: 10px 20px !important; }
-[aria-selected="true"] { color: #fff !important; border-bottom: 2px solid #6366f1 !important; }
-
-/* ── Divider ── */
-hr { border-color: #1a1c28 !important; }
-
-/* ── Streamlit input styling ── */
-.stTextInput input, .stSelectbox select {
-    background: #13141a !important;
-    border-color: #1e2030 !important;
-    color: #e2e4ea !important;
-    border-radius: 8px !important;
-}
-.stDateInput input {
-    background: #13141a !important;
-    border-color: #1e2030 !important;
-    border-radius: 8px !important;
-}
-
-/* ── Summary rows ── */
-.sum-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 7px 0;
-    border-bottom: 1px solid #13141a;
-    font-size: .84rem;
-    color: #6b7280;
-}
-.sum-row:last-child { border-bottom: none; }
-.sum-val { font-family: 'IBM Plex Mono', monospace; color: #e2e4ea; font-weight: 500; }
-.sum-card {
-    background: #0e0f14;
-    border: 1px solid #1a1c28;
-    border-radius: 14px;
-    padding: 20px 22px;
-    margin-bottom: 12px;
-}
-.sum-card-title {
-    font-family: 'Syne', sans-serif;
-    font-size: .8rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .1em;
-    margin-bottom: 14px;
-}
-
-/* ── Badge ── */
-.badge-g { background: #0a1f0f; color: #22c55e; padding: 2px 8px; border-radius: 6px; font-size: .75rem; font-weight: 600; }
-.badge-r { background: #1f0a0a; color: #ef4444; padding: 2px 8px; border-radius: 6px; font-size: .75rem; font-weight: 600; }
-.badge-y { background: #1f1508; color: #f59e0b; padding: 2px 8px; border-radius: 6px; font-size: .75rem; font-weight: 600; }
-.badge-n { background: #13141a; color: #6b7280; padding: 2px 8px; border-radius: 6px; font-size: .75rem; font-weight: 600; }
+.source-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1a2540;}
+.source-row:last-child{border-bottom:none;}
+.source-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;}
+.connected{background:#10b981;}
+.disconnected{background:#374151;}
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# CONSTANTES
-# ─────────────────────────────────────────────
-MARCAS_IGNORAR_MP = ["site mondaine", "site seculus", "site timex"]
+EXCLUIR_MARKETPLACE = ["Site Mondaine", "Site Seculus", "Site Timex"]
 
-COR_PRIMARY   = "#6366f1"
-COR_EC        = "#818cf8"
-COR_MP        = "#4ade80"
-COR_WARN      = "#f59e0b"
-COR_DANGER    = "#ef4444"
-COR_MUTED     = "#4b5268"
+EC_COLS = [
+    "order", "created_at", "customer_name", "state", "status",
+    "utmsource", "marketingtags", "payment_method", "installments",
+    "quantity_sku", "phone", "sku", "product_name",
+    "sku_selling_price", "sku_total_price", "discount_tags", "brand", "livelo_tag"
+]
 
-PLOTLY_LAYOUT = dict(
+COR_CANAL = {
+    "google-shopping": "#4a7cff",
+    "Facebook ads":    "#f59e0b",
+    "crmback":         "#10b981",
+    "ig":              "#ec4899",
+    "mais":            "#8b5cf6",
+    "Direto":          "#64748b",
+    "Outros":          "#475569",
+}
+
+COR_MP = {
+    "Livelo":       "#fbbf24",
+    "Shopee":       "#f97316",
+    "Mercado Livre":"#facc15",
+    "Amazon":       "#fb923c",
+    "Outros":       "#64748b",
+}
+
+_BASE = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#6b7280", family="DM Sans"),
-    title_font=dict(color="#9ca3b8", size=12, family="Syne"),
-    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6b7280"), orientation="h",
-                yanchor="bottom", y=1.02, xanchor="left", x=0),
-    xaxis=dict(gridcolor="#13141a", linecolor="#1e2030", tickcolor="#1e2030", tickfont=dict(size=11)),
-    yaxis=dict(gridcolor="#13141a", linecolor="#1e2030", tickcolor="#1e2030", tickfont=dict(size=11)),
-    margin=dict(l=10, r=10, t=48, b=10),
+    font=dict(color="#94a3b8", family="DM Sans", size=12),
+    title_font=dict(color="#f1f5f9", size=13, family="DM Sans"),
+    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=11)),
+    xaxis=dict(gridcolor="#1a2540", linecolor="#1e2d4a", tickcolor="#1e2d4a", zeroline=False),
+    yaxis=dict(gridcolor="#1a2540", linecolor="#1e2d4a", tickcolor="#1e2d4a", zeroline=False),
+    margin=dict(l=20, r=20, t=45, b=20),
 )
 
-PLOTLY_LAYOUT_INV = {**PLOTLY_LAYOUT, "yaxis": {**PLOTLY_LAYOUT["yaxis"], "autorange": "reversed"}}
+def L(**extra):
+    d = dict(_BASE)
+    d.update(extra)
+    return d
 
-PALETTE_EC = ["#6366f1","#818cf8","#a5b4fc","#c7d2fe","#e0e7ff"]
-PALETTE_MP = ["#4ade80","#22c55e","#16a34a","#15803d","#166534"]
-PALETTE_MIX = ["#6366f1","#4ade80","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#ec4899"]
+def L_inv(**extra):
+    d = dict(_BASE)
+    d["yaxis"] = dict(_BASE["yaxis"], autorange="reversed")
+    d.update(extra)
+    return d
 
-# ─────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────
-
-def fmt_brl(v):
-    return f"R$ {v:,.0f}"
-
-def fmt_delta(atual, anterior):
-    if not anterior or anterior == 0:
-        return None, "neu"
-    v = (atual - anterior) / anterior * 100
-    sign = "+" if v >= 0 else ""
-    cls = "pos" if v >= 0 else "neg"
-    return f"{sign}{v:.1f}%", cls
-
-def limpar_numero(s):
-    return (s.astype(str)
-            .str.replace(r"[R$\s]","",regex=True)
-            .str.replace(r"\.(?=\d{3})","",regex=True)
-            .str.replace(",",".",regex=False)
-            .pipe(pd.to_numeric, errors="coerce")
-            .fillna(0))
-
-def hex_rgba(h, a=0.12):
+def hex_rgba(h, a=0.15):
     h = h.lstrip("#")
-    r,g,b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
+    r, g, b = int(h[:2],16), int(h[2:4],16), int(h[4:6],16)
     return f"rgba({r},{g},{b},{a})"
 
-def filtrar_data(df, d_ini, d_fim, col="data"):
-    if df.empty or col not in df.columns:
-        return df
-    return df[(df[col] >= pd.Timestamp(d_ini)) & (df[col] <= pd.Timestamp(d_fim))]
+def pct(v, t):
+    return v / t * 100 if t else 0
 
-# ─────────────────────────────────────────────
-# CARREGAMENTO
-# ─────────────────────────────────────────────
+def var_pct(atual, ant):
+    if not ant or ant == 0:
+        return None
+    return (atual - ant) / ant * 100
+
+def fmt_var(v):
+    if v is None:
+        return None
+    return f"{v:+.1f}%"
+
+def fmt_brl(v):
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+for k, d in [
+    ("df_ec_raw", None), ("df_mp_raw", None),
+    ("url_ec", ""), ("url_mp", ""),
+    ("ts_ec", None), ("ts_mp", None),
+    ("page", "visao_geral"),
+]:
+    if k not in st.session_state:
+        st.session_state[k] = d
 
 @st.cache_data(ttl=300)
-def carregar_url(url: str):
+def load_url_csv(url: str, tipo: str):
     try:
         url = url.strip()
         if "docs.google.com" in url:
-            if "/edit" in url or "/view" in url or "/pub" in url:
-                sid = url.split("/d/")[1].split("/")[0]
-                gid = url.split("gid=")[1].split("&")[0].split("#")[0] if "gid=" in url else None
-                url = (f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv"
-                       + (f"&gid={gid}" if gid else ""))
-        r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+            sheet_id = url.split("/d/")[1].split("/")[0]
+            gid = url.split("gid=")[1].split("&")[0].split("#")[0] if "gid=" in url else None
+            url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+                   + (f"&gid={gid}" if gid else ""))
+        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         try:
             text = r.content.decode("utf-8")
         except UnicodeDecodeError:
             text = r.content.decode("latin-1")
-        df = pd.read_csv(StringIO(text))
-        df.columns = df.columns.str.strip()
-        return df, datetime.now().strftime("%d/%m %H:%M")
+        if tipo == "ec":
+            df = pd.read_csv(StringIO(text), header=None, names=EC_COLS)
+        else:
+            df = pd.read_csv(StringIO(text))
+        return df, datetime.now().strftime("%d/%m/%Y %H:%M")
     except Exception as e:
-        return pd.DataFrame(), str(e)
+        st.error(f"Erro ao carregar: {e}")
+        return None, None
 
-# ─────────────────────────────────────────────
-# PREPARAÇÃO — ECOMMERCE
-# ─────────────────────────────────────────────
+def load_uploaded_ec(file):
+    try:
+        text = file.read().decode("utf-8")
+    except UnicodeDecodeError:
+        file.seek(0)
+        text = file.read().decode("latin-1")
+    return pd.read_csv(StringIO(text), header=None, names=EC_COLS)
 
-def preparar_ecommerce(df_raw: pd.DataFrame) -> pd.DataFrame:
-    """
-    Colunas esperadas:
-    Order, Creation, Client Name, UF, Status, UtmSource, Coupon,
-    Payment System Name, Installments, Quantity_SKU, ID_SKU,
-    Reference Code, SKU Name, SKU Selling Price, SKU Total Price,
-    Discounts Names, Seller Name, marketingTags
-    """
-    df = df_raw.copy()
+def load_uploaded_mp(file):
+    try:
+        text = file.read().decode("utf-8")
+    except UnicodeDecodeError:
+        file.seek(0)
+        text = file.read().decode("latin-1")
+    return pd.read_csv(StringIO(text))
 
-    # Normaliza colunas
-    col_map = {}
-    for c in df.columns:
-        cn = c.strip().lower().replace(" ","_")
-        col_map[c] = cn
-    df = df.rename(columns=col_map)
-
-    # Filtra Livelo
-    for col_mt in [c for c in df.columns if "marketingtag" in c]:
-        mask_livelo = df[col_mt].astype(str).str.lower().str.contains("livelo", na=False)
-        df = df[~mask_livelo]
-
-    # Data
-    col_data = next((c for c in df.columns if c in ["creation","data","created_at","date"]), None)
-    if col_data:
-        df["data"] = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce")
-    else:
-        df["data"] = pd.NaT
-    df = df.dropna(subset=["data"])
-
-    # Preço & qtd
-    col_price = next((c for c in df.columns if "sku_selling_price" in c or c=="sku_selling_price"), None)
-    col_qty   = next((c for c in df.columns if "quantity_sku" in c or c=="quantity_sku"), None)
-    col_total = next((c for c in df.columns if "sku_total_price" in c or c=="sku_total_price"), None)
-
-    if col_price:
-        df["valor_unitario"] = limpar_numero(df[col_price])
-    if col_qty:
-        df["quantidade"] = limpar_numero(df[col_qty])
-    if col_price and col_qty:
-        df["valor_linha"] = df["valor_unitario"] * df["quantidade"]
-    elif col_total:
-        df["valor_linha"] = limpar_numero(df[col_total])
-    else:
-        df["valor_linha"] = 0.0
-
-    # Order
-    col_order = next((c for c in df.columns if c in ["order","order_id","id_order","numero_pedido"]), None)
-    if col_order:
-        df["order"] = df[col_order].astype(str).str.strip()
-    else:
-        df["order"] = df.index.astype(str)
-
-    # Status
-    col_status = next((c for c in df.columns if c in ["status","order_status","situacao"]), None)
-    if col_status:
-        df["status"] = df[col_status].astype(str).str.strip().str.lower()
-        df["faturado"] = df["status"].isin(["faturado","entregue","concluído","concluido","aprovado",
-                                             "complete","completed","paid","pago","invoiced"])
-        df["cancelado"] = df["status"].isin(["cancelado","cancelada","devolvido","canceled","cancelled"])
-    else:
-        df["faturado"]  = True
-        df["cancelado"] = False
-
-    # UTM Source
-    col_utm = next((c for c in df.columns if "utmsource" in c or c=="utm_source"), None)
-    if col_utm:
-        df["utm_source"] = df[col_utm].astype(str).str.strip().str.title()
-    else:
-        df["utm_source"] = "Desconhecido"
-
-    # Seller/Marca
-    col_seller = next((c for c in df.columns if "seller" in c), None)
-    if col_seller:
-        df["marca"] = df[col_seller].astype(str).str.strip()
-
-    # Mes
-    df["mes"] = df["data"].dt.to_period("M").astype(str)
-
+def prep_ec(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["sku_selling_price"] = pd.to_numeric(
+        df["sku_selling_price"].astype(str).str.replace(",", ".", regex=False), errors="coerce"
+    ).fillna(0)
+    df["quantity_sku"] = pd.to_numeric(df["quantity_sku"], errors="coerce").fillna(0)
+    df["line_total"] = df["sku_selling_price"] * df["quantity_sku"]
+    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+    df["data"] = df["created_at"].dt.tz_localize(None).dt.normalize()
+    livelo_mask = df["livelo_tag"].astype(str).str.strip().str.lower() == "livelo"
+    df = df[~livelo_mask].copy()
+    df["status"] = df["status"].astype(str).str.strip()
+    df["faturado"] = df["status"].isin(["Faturado", "faturado", "Aprovado", "Entregue"])
+    df["utmsource"] = df["utmsource"].fillna("Direto")
+    df["brand"] = df["brand"].fillna("Seculus")
+    df["marketingtags"] = df["marketingtags"].fillna("")
     return df
 
-# ─────────────────────────────────────────────
-# PREPARAÇÃO — MARKETPLACE
-# ─────────────────────────────────────────────
-
-def preparar_marketplace(df_raw: pd.DataFrame) -> pd.DataFrame:
-    """
-    Colunas esperadas:
-    Data do faturamento, Nota Fiscal, Quantidade faturada,
-    Valor Unitário Final, Marketplace
-    """
-    df = df_raw.copy()
-
-    col_map = {}
-    for c in df.columns:
-        cn = c.strip().lower().replace(" ","_")
-        col_map[c] = cn
-    df = df.rename(columns=col_map)
-
-    # Filtra sites próprios
-    col_mp = next((c for c in df.columns if "marketplace" in c), None)
-    if col_mp:
-        df["marketplace"] = df[col_mp].astype(str).str.strip()
-        df = df[~df["marketplace"].str.lower().isin(MARCAS_IGNORAR_MP)]
-    else:
-        df["marketplace"] = "Desconhecido"
-
-    # Data faturamento
-    col_data = next((c for c in df.columns if "data" in c and "fat" in c), None)
-    if not col_data:
-        col_data = next((c for c in df.columns if "data" in c), None)
-    if col_data:
-        df["data"] = pd.to_datetime(df[col_data], dayfirst=True, errors="coerce")
-    else:
-        df["data"] = pd.NaT
-    df = df.dropna(subset=["data"])
-
-    # Nota fiscal (validação de duplicata)
-    col_nf = next((c for c in df.columns if "nota" in c or "nf" in c or "fiscal" in c), None)
-    if col_nf:
-        df["nota_fiscal"] = df[col_nf].astype(str).str.strip()
-        df = df.drop_duplicates(subset=["nota_fiscal"])
-    else:
-        df["nota_fiscal"] = df.index.astype(str)
-
-    # Quantidade faturada
-    col_qty = next((c for c in df.columns if "quantidade" in c or "qtd" in c or "qty" in c), None)
-    if col_qty:
-        df["quantidade"] = limpar_numero(df[col_qty])
-    else:
-        df["quantidade"] = 1.0
-
-    # Valor unitário final
-    col_vl = next((c for c in df.columns if "valor" in c and "unit" in c), None)
-    if not col_vl:
-        col_vl = next((c for c in df.columns if "valor" in c or "price" in c or "preco" in c), None)
-    if col_vl:
-        df["valor_unitario"] = limpar_numero(df[col_vl])
-    else:
-        df["valor_unitario"] = 0.0
-
-    df["valor_linha"] = df["valor_unitario"] * df["quantidade"]
-    df["mes"] = df["data"].dt.to_period("M").astype(str)
-
+def prep_mp(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [c.strip().upper() for c in df.columns]
+    if "MARKETPLACE" not in df.columns:
+        for alt in ["CANAL", "PLATAFORMA", "SOURCE"]:
+            if alt in df.columns:
+                df = df.rename(columns={alt: "MARKETPLACE"})
+                break
+    df = df[~df["MARKETPLACE"].isin(EXCLUIR_MARKETPLACE)].copy()
+    valor_col = "VALOR" if "VALOR" in df.columns else df.columns[3]
+    qty_col   = "QUANTIDADE" if "QUANTIDADE" in df.columns else df.columns[2]
+    nota_col  = "NOTA" if "NOTA" in df.columns else df.columns[1]
+    data_col  = "DATA" if "DATA" in df.columns else df.columns[0]
+    df["valor_num"] = (
+        df[valor_col].astype(str)
+        .str.replace(r"\.", "", regex=True)
+        .str.replace(",", ".", regex=False)
+        .pipe(pd.to_numeric, errors="coerce")
+        .fillna(0)
+    )
+    df["qty_num"]  = pd.to_numeric(df[qty_col], errors="coerce").fillna(1)
+    df["line_total"] = df["valor_num"] * df["qty_num"]
+    df["nota"]    = df[nota_col].astype(str).str.strip()
+    df["data"]    = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce")
+    df["faturado"] = True
     return df
 
-# ─────────────────────────────────────────────
-# MÉTRICAS
-# ─────────────────────────────────────────────
-
-def metricas_ec(df):
+def agg_ec_orders(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
-        return {"receita":0, "pedidos":0, "faturados":0, "cancelados":0,
-                "ticket":0, "itens":0}
-    # Valor por order = soma de valor_linha
-    por_order = df.groupby("order").agg(
-        valor=("valor_linha","sum"),
-        faturado=("faturado","any"),
-        cancelado=("cancelado","any"),
-    ).reset_index()
-    por_order["status"] = "pendente"
-    por_order.loc[por_order["cancelado"] & ~por_order["faturado"], "status"] = "cancelado"
-    por_order.loc[por_order["faturado"], "status"] = "faturado"
+        return pd.DataFrame()
+    return (
+        df.groupby("order")
+        .agg(
+            data=("data", "first"),
+            status=("status", "first"),
+            faturado=("faturado", "first"),
+            brand=("brand", "first"),
+            utmsource=("utmsource", "first"),
+            receita=("line_total", "sum"),
+            itens=("quantity_sku", "sum"),
+            state=("state", "first"),
+        )
+        .reset_index()
+    )
 
-    fat  = por_order[por_order["status"]=="faturado"]
-    canc = por_order[por_order["status"]=="cancelado"]
-    receita = float(fat["valor"].sum())
-    pedidos = len(por_order)
-    faturados = len(fat)
-    cancelados = len(canc)
-    ticket = float(fat["valor"].mean()) if len(fat) > 0 else 0
-    itens = int(df["quantidade"].sum()) if "quantidade" in df.columns else len(df)
-    return {"receita":receita,"pedidos":pedidos,"faturados":faturados,
-            "cancelados":cancelados,"ticket":ticket,"itens":itens}
-
-def metricas_mp(df):
+def agg_mp_notas(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
-        return {"receita":0, "notas":0, "itens":0, "ticket":0}
-    receita = float(df["valor_linha"].sum())
-    notas   = int(df["nota_fiscal"].nunique())
-    itens   = int(df["quantidade"].sum())
-    ticket  = receita / notas if notas > 0 else 0
-    return {"receita":receita,"notas":notas,"itens":itens,"ticket":ticket}
+        return pd.DataFrame()
+    return (
+        df.groupby(["nota", "MARKETPLACE"])
+        .agg(
+            data=("data", "first"),
+            receita=("line_total", "sum"),
+            itens=("qty_num", "sum"),
+            faturado=("faturado", "first"),
+        )
+        .reset_index()
+    )
 
-# ─────────────────────────────────────────────
-# SESSION STATE
-# ─────────────────────────────────────────────
-for k, v in [
-    ("df_ec_raw", pd.DataFrame()),
-    ("df_mp_raw", pd.DataFrame()),
-    ("df_ec", pd.DataFrame()),
-    ("df_mp", pd.DataFrame()),
-    ("ts_ec", ""),
-    ("ts_mp", ""),
-    ("active_tab", "overview"),
-]:
-    if k not in st.session_state:
-        st.session_state[k] = v
+def filter_period(df, d_ini, d_fim):
+    if df.empty or "data" not in df.columns:
+        return df
+    return df[(df["data"] >= pd.Timestamp(d_ini)) & (df["data"] <= pd.Timestamp(d_fim))]
 
-# ─────────────────────────────────────────────
-# TOP NAVIGATION
-# ─────────────────────────────────────────────
-tabs_def = [
-    ("overview",   "Overview"),
-    ("ecommerce",  "E-commerce"),
-    ("marketplace","Marketplace"),
-    ("detailed",   "Detalhado"),
-    ("config",     "Configurações"),
-]
+def prev_period(ini, fim, modo):
+    if modo == "Período anterior equivalente":
+        delta = fim - ini
+        return ini - delta - timedelta(days=1), ini - timedelta(days=1)
+    elif modo == "Mês anterior":
+        p = ini.replace(day=1)
+        fe = p - timedelta(days=1)
+        return fe.replace(day=1), fe
+    elif modo == "Mesmo período ano anterior":
+        try:
+            return ini.replace(year=ini.year-1), fim.replace(year=fim.year-1)
+        except ValueError:
+            return ini - timedelta(days=365), fim - timedelta(days=365)
+    return ini, fim
 
-# Compute active tab from query param or session
-tab_labels_html = ""
-for tid, tlabel in tabs_def:
-    active_cls = "active" if st.session_state.active_tab == tid else ""
-    tab_labels_html += f'<button class="nav-tab {active_cls}" onclick="void(0)">{tlabel}</button>'
+def kpi_metrics(orders_df):
+    if orders_df.empty:
+        return {"total":0,"fat":0,"pend":0,"receita":0,"ticket":0,"itens":0}
+    fat = orders_df[orders_df["faturado"]]
+    total = len(orders_df)
+    fat_n = len(fat)
+    receita = float(fat["receita"].sum()) if "receita" in fat.columns else 0
+    ticket = float(fat["receita"].mean()) if fat_n > 0 else 0
+    itens = int(fat["itens"].sum()) if "itens" in fat.columns else fat_n
+    pend = total - fat_n
+    return {"total":total,"fat":fat_n,"pend":pend,"receita":receita,"ticket":ticket,"itens":itens}
 
-# Dot status
-ec_ok = not st.session_state.df_ec.empty
-mp_ok = not st.session_state.df_mp.empty
-dot_color = "#22c55e" if (ec_ok or mp_ok) else "#374151"
+def sparkline(serie, cor="#3b6fff", w=70, h=22):
+    s = serie.fillna(0).values
+    if len(s) < 2 or s.max() == s.min():
+        return ""
+    xs = [int(i/(len(s)-1)*w) for i in range(len(s))]
+    mn, mx = s.min(), s.max()
+    ys = [int(h - (v-mn)/(mx-mn)*(h-4) - 2) for v in s]
+    pts = " ".join(f"{x},{y}" for x,y in zip(xs,ys))
+    return (f'<svg width="{w}" height="{h}" style="vertical-align:middle">'
+            f'<polyline points="{pts}" fill="none" stroke="{cor}" stroke-width="1.8" '
+            f'stroke-linecap="round" stroke-linejoin="round"/></svg>')
+
+has_ec = st.session_state.df_ec_raw is not None
+has_mp = st.session_state.df_mp_raw is not None
+
+ts_ec = st.session_state.ts_ec or "—"
+ts_mp = st.session_state.ts_mp or "—"
 
 st.markdown(f"""
-<div class="nav-bar">
-    <div class="nav-logo">⌚ Grupo <span>Seculus</span></div>
-    <div class="nav-right">
-        <span style="color:{dot_color};font-size:.9rem;">●</span>
-        {"EC ✓" if ec_ok else "EC —"}
-        &nbsp;/&nbsp;
-        {"MP ✓" if mp_ok else "MP —"}
-    </div>
+<div class="topbar">
+  <div class="topbar-brand">⌚ <span>Seculus</span> · Sales Intelligence</div>
+  <div class="topbar-right">
+    <span class="dot-live"></span>
+    <span>E-com: {ts_ec}</span>
+    <span style="color:#1a2540">|</span>
+    <span>MKT: {ts_mp}</span>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-# Streamlit native tabs (functional)
-tab_names = [t[1] for t in tabs_def]
-tabs = st.tabs(tab_names)
+with st.expander("⚙️  Fontes de Dados & Configurações", expanded=not (has_ec or has_mp)):
+    cfg_c1, cfg_c2, cfg_c3 = st.columns([2, 2, 1])
 
-# ─────────────────────────────────────────────
-# CONFIGURAÇÕES (última aba)
-# ─────────────────────────────────────────────
-with tabs[4]:
-    st.markdown('<div class="page-header"><p class="page-title">Configurações</p><p class="page-subtitle">conecte suas planilhas de dados</p></div>', unsafe_allow_html=True)
-
-    col_cfg1, col_cfg2 = st.columns(2)
-
-    with col_cfg1:
-        st.markdown('<div class="section-label"><span class="platform-pill pill-ec">E-commerce</span></div>', unsafe_allow_html=True)
-        url_ec = st.text_input("URL Google Sheets / CSV — E-commerce",
-                               placeholder="https://docs.google.com/spreadsheets/d/...",
-                               key="url_ec_input")
-        if st.button("Carregar E-commerce", use_container_width=True, key="btn_ec"):
-            if url_ec.strip():
+    with cfg_c1:
+        st.markdown("**🛒 E-commerce**")
+        ec_url = st.text_input("URL Google Sheets / CSV", key="ec_url_inp",
+                               placeholder="https://docs.google.com/spreadsheets/d/...")
+        ec_file = st.file_uploader("ou upload CSV", type="csv", key="ec_upload")
+        if st.button("Carregar E-commerce", use_container_width=True):
+            if ec_file:
+                df_raw = load_uploaded_ec(ec_file)
+                st.session_state.df_ec_raw = df_raw
+                st.session_state.ts_ec = datetime.now().strftime("%d/%m/%Y %H:%M")
+                st.success(f"✅ {len(df_raw)} linhas carregadas")
+                st.rerun()
+            elif ec_url.strip():
                 with st.spinner("Carregando..."):
-                    df_raw, ts = carregar_url(url_ec.strip())
-                if not df_raw.empty:
+                    df_raw, ts = load_url_csv(ec_url.strip(), "ec")
+                if df_raw is not None:
                     st.session_state.df_ec_raw = df_raw
-                    st.session_state.df_ec = preparar_ecommerce(df_raw)
                     st.session_state.ts_ec = ts
-                    n = len(st.session_state.df_ec)
-                    ped = st.session_state.df_ec["order"].nunique() if "order" in st.session_state.df_ec.columns else 0
-                    st.success(f"✅ {n} linhas · {ped} pedidos únicos · {ts}")
-                else:
-                    st.error(f"Erro: {ts}")
-            else:
-                st.warning("Insira uma URL.")
+                    st.success(f"✅ {len(df_raw)} linhas carregadas")
+                    st.rerun()
 
-        if not st.session_state.df_ec.empty:
-            st.markdown("**Preview das colunas detectadas:**")
-            st.dataframe(st.session_state.df_ec_raw.head(3), use_container_width=True)
-
-    with col_cfg2:
-        st.markdown('<div class="section-label"><span class="platform-pill pill-mp">Marketplace</span></div>', unsafe_allow_html=True)
-        url_mp = st.text_input("URL Google Sheets / CSV — Marketplace",
-                               placeholder="https://docs.google.com/spreadsheets/d/...",
-                               key="url_mp_input")
-        if st.button("Carregar Marketplace", use_container_width=True, key="btn_mp"):
-            if url_mp.strip():
+    with cfg_c2:
+        st.markdown("**🏪 Marketplace**")
+        mp_url = st.text_input("URL Google Sheets / CSV", key="mp_url_inp",
+                               placeholder="https://docs.google.com/spreadsheets/d/...")
+        mp_file = st.file_uploader("ou upload CSV", type="csv", key="mp_upload")
+        if st.button("Carregar Marketplace", use_container_width=True):
+            if mp_file:
+                df_raw = load_uploaded_mp(mp_file)
+                st.session_state.df_mp_raw = df_raw
+                st.session_state.ts_mp = datetime.now().strftime("%d/%m/%Y %H:%M")
+                st.success(f"✅ {len(df_raw)} linhas carregadas")
+                st.rerun()
+            elif mp_url.strip():
                 with st.spinner("Carregando..."):
-                    df_raw, ts = carregar_url(url_mp.strip())
-                if not df_raw.empty:
+                    df_raw, ts = load_url_csv(mp_url.strip(), "mp")
+                if df_raw is not None:
                     st.session_state.df_mp_raw = df_raw
-                    st.session_state.df_mp = preparar_marketplace(df_raw)
                     st.session_state.ts_mp = ts
-                    n = len(st.session_state.df_mp)
-                    nf = st.session_state.df_mp["nota_fiscal"].nunique() if "nota_fiscal" in st.session_state.df_mp.columns else 0
-                    st.success(f"✅ {n} linhas · {nf} notas fiscais únicas · {ts}")
-                else:
-                    st.error(f"Erro: {ts}")
-            else:
-                st.warning("Insira uma URL.")
+                    st.success(f"✅ {len(df_raw)} linhas carregadas")
+                    st.rerun()
 
-        if not st.session_state.df_mp.empty:
-            st.markdown("**Preview das colunas detectadas:**")
-            st.dataframe(st.session_state.df_mp_raw.head(3), use_container_width=True)
+    with cfg_c3:
+        st.markdown("**📋 Template**")
+        template_ec = """order,created_at,customer_name,state,status,utmsource,marketingtags,payment_method,installments,quantity_sku,phone,sku,product_name,sku_selling_price,sku_total_price,discount_tags,brand,livelo_tag
+PED001,2025-01-01 10:00:00Z,Cliente A,SP,Faturado,google-shopping,PRIMEIRACOMPRA,Pix,1,1,,SKU001,Relógio Slim,350.00,350.00,,Seculus,
+PED001,2025-01-01 10:00:00Z,Cliente A,SP,Faturado,google-shopping,PRIMEIRACOMPRA,Pix,1,1,,SKU002,Pulseira Extra,80.00,80.00,,Seculus,"""
+        template_mp = """DATA,NOTA,QUANTIDADE,VALOR,MARKETPLACE
+01/01/2025,NF001,1,269.10,Livelo
+01/01/2025,NF001,2,180.00,Shopee"""
+        st.download_button("⬇️ Template E-com", data=template_ec,
+                           file_name="template_ecommerce.csv", mime="text/csv",
+                           use_container_width=True)
+        st.download_button("⬇️ Template MKT", data=template_mp,
+                           file_name="template_marketplace.csv", mime="text/csv",
+                           use_container_width=True)
+        if has_ec or has_mp:
+            st.markdown("**Status:**")
+            st.markdown(
+                f"{'🟢' if has_ec else '🔴'} E-commerce &nbsp;&nbsp; "
+                f"{'🟢' if has_mp else '🔴'} Marketplace",
+                unsafe_allow_html=True,
+            )
 
-    st.markdown("---")
-    st.markdown("**Filtro de período** (configurado nas abas de análise)")
-    st.info("As abas de análise possuem seleção de período no topo.")
-
-    # Colunas de referência
-    with st.expander("📋 Estrutura esperada das planilhas"):
-        st.markdown("""
-**E-commerce** — colunas obrigatórias/esperadas:
-| Coluna | Uso |
-|---|---|
-| `Order` | ID do pedido (chave de agrupamento) |
-| `Creation` | Data do pedido |
-| `Status` | Status do pedido |
-| `UtmSource` | Origem do tráfego |
-| `Quantity_SKU` | Quantidade do SKU |
-| `SKU Selling Price` | Preço unitário do SKU |
-| `Seller Name` | Marca / seller |
-| `marketingTags` | Pedidos com Livelo são ignorados |
-
-**Marketplace** — colunas obrigatórias/esperadas:
-| Coluna | Uso |
-|---|---|
-| `Data do faturamento` | Data do faturamento |
-| `Nota Fiscal` | Identificador único (dedup) |
-| `Quantidade faturada` | Quantidade |
-| `Valor Unitário Final` | Preço unitário |
-| `Marketplace` | Plataforma (Sites próprios são ignorados) |
-        """)
-
-# ─────────────────────────────────────────────
-# HELPER: seletor de período reutilizável
-# ─────────────────────────────────────────────
-def seletor_periodo(key_prefix="main"):
-    hoje = datetime.today().date()
-    col1, col2, col3, col4 = st.columns([2,2,1,1])
-    with col1:
-        d_ini = st.date_input("De", value=hoje - timedelta(days=30), key=f"{key_prefix}_ini")
-    with col2:
-        d_fim = st.date_input("Até", value=hoje, key=f"{key_prefix}_fim")
-    with col3:
-        if st.button("30d", key=f"{key_prefix}_30d", use_container_width=True):
-            st.session_state[f"{key_prefix}_ini"] = hoje - timedelta(days=30)
-            st.session_state[f"{key_prefix}_fim"] = hoje
-            st.rerun()
-    with col4:
-        if st.button("Mês", key=f"{key_prefix}_mes", use_container_width=True):
-            st.session_state[f"{key_prefix}_ini"] = hoje.replace(day=1)
-            st.session_state[f"{key_prefix}_fim"] = hoje
-            st.rerun()
-    return d_ini, d_fim
-
-def periodo_anterior(d_ini, d_fim):
-    delta = d_fim - d_ini
-    return d_ini - delta - timedelta(days=1), d_ini - timedelta(days=1)
-
-# ─────────────────────────────────────────────
-# GUARD: sem dados
-# ─────────────────────────────────────────────
-def guard_sem_dados():
+if not has_ec and not has_mp:
     st.markdown("""
-    <div class="upload-area">
-        <p class="upload-title">Nenhum dado carregado</p>
-        <p class="upload-sub">Vá para a aba <strong>Configurações</strong> e insira os links das planilhas.</p>
+    <div class="upload-zone">
+        <h3>Nenhum dado carregado</h3>
+        <p>Use o painel acima para carregar os dados de E-commerce e Marketplace.<br>
+        Abra "Fontes de Dados & Configurações" e insira os links ou faça upload dos CSVs.</p>
     </div>
     """, unsafe_allow_html=True)
+    st.stop()
 
-# ─────────────────────────────────────────────
-# ABA 0 — OVERVIEW
-# ─────────────────────────────────────────────
-with tabs[0]:
-    st.markdown('<div class="page-header"><p class="page-title">Overview</p><p class="page-subtitle">visão consolidada · e-commerce + marketplace</p></div>', unsafe_allow_html=True)
+df_ec = prep_ec(st.session_state.df_ec_raw) if has_ec else pd.DataFrame()
+df_mp = prep_mp(st.session_state.df_mp_raw) if has_mp else pd.DataFrame()
 
-    if st.session_state.df_ec.empty and st.session_state.df_mp.empty:
-        guard_sem_dados()
-    else:
-        d_ini, d_fim = seletor_periodo("ov")
-        d_ini_ant, d_fim_ant = periodo_anterior(d_ini, d_fim)
+ec_orders_all = agg_ec_orders(df_ec) if has_ec else pd.DataFrame()
+mp_notas_all  = agg_mp_notas(df_mp)  if has_mp else pd.DataFrame()
 
-        df_ec  = filtrar_data(st.session_state.df_ec,  d_ini, d_fim)
-        df_mp  = filtrar_data(st.session_state.df_mp,  d_ini, d_fim)
-        df_ec_ant = filtrar_data(st.session_state.df_ec, d_ini_ant, d_fim_ant)
-        df_mp_ant = filtrar_data(st.session_state.df_mp, d_ini_ant, d_fim_ant)
+st.markdown("---")
+filter_row = st.columns([2, 2, 2, 1, 1, 1, 1, 1])
+with filter_row[0]:
+    hoje = datetime.today().date()
+    data_inicio = st.date_input("De", value=hoje - timedelta(days=30), key="fi")
+with filter_row[1]:
+    data_fim = st.date_input("Até", value=hoje, key="ff")
+with filter_row[2]:
+    comp_modo = st.selectbox("Comparar com",
+        ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"])
+with filter_row[3]:
+    if st.button("7d"):
+        st.session_state.fi = hoje - timedelta(days=7)
+        st.session_state.ff = hoje
+        st.rerun()
+with filter_row[4]:
+    if st.button("30d"):
+        st.session_state.fi = hoje - timedelta(days=30)
+        st.session_state.ff = hoje
+        st.rerun()
+with filter_row[5]:
+    if st.button("Mês"):
+        st.session_state.fi = hoje.replace(day=1)
+        st.session_state.ff = hoje
+        st.rerun()
+with filter_row[6]:
+    if st.button("Ano"):
+        st.session_state.fi = hoje.replace(month=1, day=1)
+        st.session_state.ff = hoje
+        st.rerun()
+with filter_row[7]:
+    if st.button("Hoje"):
+        st.session_state.fi = hoje
+        st.session_state.ff = hoje
+        st.rerun()
 
-        m_ec  = metricas_ec(df_ec)
-        m_mp  = metricas_mp(df_mp)
-        m_ec_ant = metricas_ec(df_ec_ant)
-        m_mp_ant = metricas_mp(df_mp_ant)
+ini_ant, fim_ant = prev_period(data_inicio, data_fim, comp_modo)
 
-        rec_total     = m_ec["receita"] + m_mp["receita"]
-        rec_total_ant = m_ec_ant["receita"] + m_mp_ant["receita"]
-        delta_total, cls_total = fmt_delta(rec_total, rec_total_ant)
+ec_period      = filter_period(ec_orders_all, data_inicio, data_fim)
+mp_period      = filter_period(mp_notas_all,  data_inicio, data_fim)
+ec_period_ant  = filter_period(ec_orders_all, ini_ant, fim_ant)
+mp_period_ant  = filter_period(mp_notas_all,  ini_ant, fim_ant)
 
-        # ── KPI row ──
-        st.markdown('<div class="section-label">KPIs Consolidados</div>', unsafe_allow_html=True)
+ec_m  = kpi_metrics(ec_period)
+mp_m  = kpi_metrics(mp_period)
+ec_ma = kpi_metrics(ec_period_ant)
+mp_ma = kpi_metrics(mp_period_ant)
 
-        k1,k2,k3,k4 = st.columns(4)
-        with k1:
-            dv, dc = fmt_delta(rec_total, rec_total_ant)
-            st.markdown(f"""
-            <div class="kpi-card" style="--accent:{COR_PRIMARY}">
-                <div class="kpi-label">Receita Total</div>
-                <div class="kpi-value">{fmt_brl(rec_total)}</div>
-                <div class="kpi-delta {dc}">{dv or "—"} vs período ant.</div>
-            </div>""", unsafe_allow_html=True)
-        with k2:
-            dv, dc = fmt_delta(m_ec["receita"], m_ec_ant["receita"])
-            st.markdown(f"""
-            <div class="kpi-card" style="--accent:{COR_EC}">
-                <div class="kpi-label"><span class="platform-pill pill-ec">E-commerce</span></div>
-                <div class="kpi-value">{fmt_brl(m_ec['receita'])}</div>
-                <div class="kpi-delta {dc}">{dv or "—"} vs período ant.</div>
-            </div>""", unsafe_allow_html=True)
-        with k3:
-            dv, dc = fmt_delta(m_mp["receita"], m_mp_ant["receita"])
-            st.markdown(f"""
-            <div class="kpi-card" style="--accent:{COR_MP}">
-                <div class="kpi-label"><span class="platform-pill pill-mp">Marketplace</span></div>
-                <div class="kpi-value">{fmt_brl(m_mp['receita'])}</div>
-                <div class="kpi-delta {dc}">{dv or "—"} vs período ant.</div>
-            </div>""", unsafe_allow_html=True)
-        with k4:
-            total_ped = m_ec["pedidos"] + m_mp["notas"]
-            total_ped_ant = m_ec_ant["pedidos"] + m_mp_ant["notas"]
-            dv, dc = fmt_delta(total_ped, total_ped_ant)
-            st.markdown(f"""
-            <div class="kpi-card" style="--accent:{COR_WARN}">
-                <div class="kpi-label">Pedidos / Notas</div>
-                <div class="kpi-value">{total_ped:,}</div>
-                <div class="kpi-delta {dc}">{dv or "—"} vs período ant.</div>
-            </div>""", unsafe_allow_html=True)
+total_receita = ec_m["receita"] + mp_m["receita"]
+total_receita_ant = ec_ma["receita"] + mp_ma["receita"]
 
-        st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("---")
 
-        # ── Evolução combinada ──
-        st.markdown('<div class="section-label">Evolução de Receita</div>', unsafe_allow_html=True)
+tab_geral, tab_ec, tab_mp, tab_produtos = st.tabs([
+    "📊 Visão Geral",
+    "🛒 E-commerce",
+    "🏪 Marketplace",
+    "🏆 Produtos & SKUs",
+])
 
-        col_ch1, col_ch2 = st.columns([3,1])
-        with col_ch1:
-            fig_ev = go.Figure()
-            if not df_ec.empty and "faturado" in df_ec.columns:
-                ev_ec = (df_ec[df_ec["faturado"]]
-                         .groupby("data")["valor_linha"].sum().reset_index())
-                fig_ev.add_trace(go.Scatter(
-                    x=ev_ec["data"], y=ev_ec["valor_linha"],
-                    name="E-commerce", mode="lines", fill="tozeroy",
-                    line=dict(color=COR_EC, width=2.5, shape="spline", smoothing=1.2),
-                    fillcolor=hex_rgba(COR_EC, 0.08),
-                ))
-            if not df_mp.empty:
-                ev_mp = df_mp.groupby("data")["valor_linha"].sum().reset_index()
-                fig_ev.add_trace(go.Scatter(
-                    x=ev_mp["data"], y=ev_mp["valor_linha"],
-                    name="Marketplace", mode="lines", fill="tozeroy",
-                    line=dict(color=COR_MP, width=2.5, shape="spline", smoothing=1.2),
-                    fillcolor=hex_rgba(COR_MP, 0.06),
-                ))
-            fig_ev.update_layout(**PLOTLY_LAYOUT, height=280)
-            st.plotly_chart(fig_ev, use_container_width=True)
+with tab_geral:
+    st.markdown("""
+    <div class="section-header">
+      <h3>KPIs Consolidados</h3>
+      <div class="divider"></div>
+    </div>""", unsafe_allow_html=True)
 
-        with col_ch2:
-            # Share EC vs MP
-            labels = []; values = []; colors = []
-            if m_ec["receita"] > 0:
-                labels.append("E-commerce"); values.append(m_ec["receita"]); colors.append(COR_EC)
-            if m_mp["receita"] > 0:
-                labels.append("Marketplace"); values.append(m_mp["receita"]); colors.append(COR_MP)
-            if labels:
-                fig_sh = go.Figure(go.Pie(
-                    labels=labels, values=values,
-                    marker=dict(colors=colors, line=dict(color="#0a0b0f", width=2)),
-                    hole=0.65, textinfo="percent",
-                    textfont=dict(size=11, color="#e2e4ea"),
-                ))
-                fig_sh.update_layout(**{**PLOTLY_LAYOUT,
-                    "showlegend":True,
-                    "legend":dict(orientation="v", bgcolor="rgba(0,0,0,0)",
-                                  font=dict(color="#6b7280"), x=0.5, y=-0.15,
-                                  xanchor="center"),
-                    "height":280, "margin":dict(l=0,r=0,t=10,b=30)})
-                st.plotly_chart(fig_sh, use_container_width=True)
+    g1, g2, g3, g4, g5, g6 = st.columns(6)
+    g1.metric("💰 Receita Total", fmt_brl(total_receita),
+              delta=fmt_var(var_pct(total_receita, total_receita_ant)))
+    g2.metric("🛒 E-commerce",    fmt_brl(ec_m["receita"]),
+              delta=fmt_var(var_pct(ec_m["receita"], ec_ma["receita"])))
+    g3.metric("🏪 Marketplace",   fmt_brl(mp_m["receita"]),
+              delta=fmt_var(var_pct(mp_m["receita"], mp_ma["receita"])))
+    g4.metric("📦 Pedidos E-com",  f"{ec_m['total']:,}",
+              delta=fmt_var(var_pct(ec_m["total"], ec_ma["total"])))
+    g5.metric("🎟️ Ticket E-com",  fmt_brl(ec_m["ticket"]),
+              delta=fmt_var(var_pct(ec_m["ticket"], ec_ma["ticket"])))
+    g6.metric("📑 NFs Marketplace", f"{mp_m['total']:,}",
+              delta=fmt_var(var_pct(mp_m["total"], mp_ma["total"])))
 
-        # ── Resumo cards ──
-        st.markdown('<div class="section-label">Resumo por Plataforma</div>', unsafe_allow_html=True)
-        c1, c2 = st.columns(2)
-        with c1:
-            tc_pct = (m_ec["cancelados"]/m_ec["pedidos"]*100) if m_ec["pedidos"] else 0
-            taxa_fat = (m_ec["faturados"]/m_ec["pedidos"]*100) if m_ec["pedidos"] else 0
-            st.markdown(f"""
-            <div class="sum-card">
-                <div class="sum-card-title" style="color:{COR_EC}">E-commerce</div>
-                <div class="sum-row"><span>Pedidos únicos</span><span class="sum-val">{m_ec['pedidos']:,}</span></div>
-                <div class="sum-row"><span>Faturados</span><span class="sum-val"><span class="badge-g">{m_ec['faturados']:,}</span></span></div>
-                <div class="sum-row"><span>Cancelados</span><span class="sum-val"><span class="badge-r">{m_ec['cancelados']:,}</span></span></div>
-                <div class="sum-row"><span>Taxa faturamento</span><span class="sum-val">{taxa_fat:.1f}%</span></div>
-                <div class="sum-row"><span>Receita faturada</span><span class="sum-val">{fmt_brl(m_ec['receita'])}</span></div>
-                <div class="sum-row"><span>Ticket médio</span><span class="sum-val">{fmt_brl(m_ec['ticket'])}</span></div>
-                <div class="sum-row"><span>Itens vendidos</span><span class="sum-val">{m_ec['itens']:,}</span></div>
-            </div>""", unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"""
-            <div class="sum-card">
-                <div class="sum-card-title" style="color:{COR_MP}">Marketplace</div>
-                <div class="sum-row"><span>Notas fiscais únicas</span><span class="sum-val">{m_mp['notas']:,}</span></div>
-                <div class="sum-row"><span>Itens faturados</span><span class="sum-val"><span class="badge-g">{m_mp['itens']:,}</span></span></div>
-                <div class="sum-row"><span>Receita total</span><span class="sum-val">{fmt_brl(m_mp['receita'])}</span></div>
-                <div class="sum-row"><span>Ticket médio/NF</span><span class="sum-val">{fmt_brl(m_mp['ticket'])}</span></div>
-            </div>""", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# ABA 1 — E-COMMERCE
-# ─────────────────────────────────────────────
-with tabs[1]:
-    st.markdown('<div class="page-header"><p class="page-title">E-commerce</p><p class="page-subtitle">análise de pedidos, UTM source e performance</p></div>', unsafe_allow_html=True)
+    v_ec  = ec_m["receita"]
+    v_mp  = mp_m["receita"]
+    v_tot = v_ec + v_mp
+    if v_tot > 0:
+        st.markdown(
+            f"<div class='insight-card'>"
+            f"📐 <strong>Mix de canal:</strong> E-commerce responde por "
+            f"<strong>{pct(v_ec,v_tot):.1f}%</strong> da receita do período "
+            f"(R$ {v_ec:,.0f}) e Marketplace por "
+            f"<strong>{pct(v_mp,v_tot):.1f}%</strong> (R$ {v_mp:,.0f}).</div>",
+            unsafe_allow_html=True,
+        )
 
-    if st.session_state.df_ec.empty:
-        guard_sem_dados()
-    else:
-        d_ini, d_fim = seletor_periodo("ec")
-        df_ec = filtrar_data(st.session_state.df_ec, d_ini, d_fim)
-        df_ec_ant = filtrar_data(st.session_state.df_ec, *periodo_anterior(d_ini, d_fim))
-
-        m     = metricas_ec(df_ec)
-        m_ant = metricas_ec(df_ec_ant)
-
-        # KPIs
-        k1,k2,k3,k4,k5 = st.columns(5)
-        kpis_ec = [
-            ("Receita",    fmt_brl(m['receita']),    m['receita'],    m_ant['receita'],    COR_EC),
-            ("Pedidos",    f"{m['pedidos']:,}",       m['pedidos'],    m_ant['pedidos'],    COR_PRIMARY),
-            ("Faturados",  f"{m['faturados']:,}",     m['faturados'],  m_ant['faturados'],  "#22c55e"),
-            ("Cancelados", f"{m['cancelados']:,}",    m['cancelados'], m_ant['cancelados'], COR_DANGER),
-            ("Ticket Médio",fmt_brl(m['ticket']),     m['ticket'],     m_ant['ticket'],     COR_WARN),
-        ]
-        for col, (label, val_str, val, vant, cor) in zip([k1,k2,k3,k4,k5], kpis_ec):
-            dv, dc = fmt_delta(val, vant)
-            col.markdown(f"""
-            <div class="kpi-card" style="--accent:{cor}">
-                <div class="kpi-label">{label}</div>
-                <div class="kpi-value">{val_str}</div>
-                <div class="kpi-delta {dc}">{dv or "—"}</div>
-            </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # UTM Source — contagem por ORDER única
-        st.markdown('<div class="section-label">UTM Source — pedidos com vendas reais (faturados)</div>', unsafe_allow_html=True)
-
-        if "utm_source" in df_ec.columns and "order" in df_ec.columns:
-            # Deduplicar por order antes de contar UTM
-            df_fat = df_ec[df_ec["faturado"]] if "faturado" in df_ec.columns else df_ec
-            utm_dedup = df_fat.drop_duplicates(subset=["order"])[["order","utm_source","valor_linha"]].copy()
-
-            # Valor real por order
-            val_por_order = df_fat.groupby("order")["valor_linha"].sum().reset_index()
-            utm_dedup2 = df_fat.drop_duplicates(subset=["order"])[["order","utm_source"]].merge(val_por_order, on="order")
-
-            utm_agg = (utm_dedup2.groupby("utm_source")
-                       .agg(pedidos=("order","nunique"), receita=("valor_linha","sum"))
-                       .reset_index().sort_values("receita", ascending=False))
-            utm_agg["ticket"] = utm_agg["receita"] / utm_agg["pedidos"].replace(0, np.nan)
-            utm_agg["pct"] = utm_agg["receita"] / utm_agg["receita"].sum() * 100
-
-            col_u1, col_u2 = st.columns(2)
-            with col_u1:
-                fig_utm_bar = px.bar(
-                    utm_agg.head(12), x="receita", y="utm_source",
-                    orientation="h",
-                    color="receita",
-                    color_continuous_scale=[[0,"#1a1c28"],[1,COR_EC]],
-                    labels={"receita":"Receita (R$)","utm_source":""},
-                    text=utm_agg.head(12)["pct"].map("{:.1f}%".format),
-                )
-                fig_utm_bar.update_traces(textposition="outside", textfont=dict(color="#9ca3b8"))
-                fig_utm_bar.update_layout(**{**PLOTLY_LAYOUT_INV, "coloraxis_showscale":False, "height":360})
-                st.plotly_chart(fig_utm_bar, use_container_width=True)
-
-            with col_u2:
-                fig_utm_pie = px.pie(
-                    utm_agg, names="utm_source", values="pedidos",
-                    color_discrete_sequence=PALETTE_EC + PALETTE_MIX, hole=0.6,
-                    title="Distribuição de Pedidos",
-                )
-                fig_utm_pie.update_traces(textinfo="percent+label", textfont_size=11)
-                fig_utm_pie.update_layout(**{**PLOTLY_LAYOUT, "height":360})
-                st.plotly_chart(fig_utm_pie, use_container_width=True)
-
-            # Tabela UTM
-            utm_exib = utm_agg.copy()
-            utm_exib["receita"] = utm_exib["receita"].map(fmt_brl)
-            utm_exib["ticket"]  = utm_exib["ticket"].map(fmt_brl)
-            utm_exib["pct"]     = utm_exib["pct"].map("{:.1f}%".format)
-            utm_exib = utm_exib.rename(columns={"utm_source":"UTM Source","pedidos":"Pedidos",
-                                                  "receita":"Receita","ticket":"Ticket Médio","pct":"Share"})
-            st.dataframe(utm_exib, use_container_width=True, hide_index=True)
-
-        # Evolução diária
-        st.markdown('<div class="section-label">Receita Diária</div>', unsafe_allow_html=True)
-        if "faturado" in df_ec.columns:
-            ev = df_ec[df_ec["faturado"]].groupby("data")["valor_linha"].sum().reset_index()
-            fig_ev2 = go.Figure(go.Scatter(
-                x=ev["data"], y=ev["valor_linha"], mode="lines", fill="tozeroy",
-                line=dict(color=COR_EC, width=2.5, shape="spline", smoothing=1.2),
-                fillcolor=hex_rgba(COR_EC, 0.08),
-            ))
-            fig_ev2.update_layout(**{**PLOTLY_LAYOUT, "height":220})
-            st.plotly_chart(fig_ev2, use_container_width=True)
-
-        # Funil status
-        st.markdown('<div class="section-label">Funil de Conversão</div>', unsafe_allow_html=True)
-        fig_fun = go.Figure(go.Funnel(
-            y=["Realizados","Faturados","Cancelados"],
-            x=[m['pedidos'], m['faturados'], m['cancelados']],
-            marker={"color":[COR_PRIMARY, "#22c55e", COR_DANGER]},
-            textinfo="value+percent initial",
-            textfont=dict(color="#e2e4ea"),
-        ))
-        fig_fun.update_layout(**{**PLOTLY_LAYOUT, "height":220})
-        st.plotly_chart(fig_fun, use_container_width=True)
-
-# ─────────────────────────────────────────────
-# ABA 2 — MARKETPLACE
-# ─────────────────────────────────────────────
-with tabs[2]:
-    st.markdown('<div class="page-header"><p class="page-title">Marketplace</p><p class="page-subtitle">análise por plataforma · notas fiscais validadas</p></div>', unsafe_allow_html=True)
-
-    if st.session_state.df_mp.empty:
-        guard_sem_dados()
-    else:
-        d_ini, d_fim = seletor_periodo("mp")
-        df_mp = filtrar_data(st.session_state.df_mp, d_ini, d_fim)
-        df_mp_ant = filtrar_data(st.session_state.df_mp, *periodo_anterior(d_ini, d_fim))
-
-        m     = metricas_mp(df_mp)
-        m_ant = metricas_mp(df_mp_ant)
-
-        k1,k2,k3,k4 = st.columns(4)
-        kpis_mp = [
-            ("Receita",       fmt_brl(m['receita']),  m['receita'],  m_ant['receita'],  COR_MP),
-            ("Notas Fiscais", f"{m['notas']:,}",       m['notas'],    m_ant['notas'],    "#22c55e"),
-            ("Itens Fat.",    f"{m['itens']:,}",       m['itens'],    m_ant['itens'],    COR_WARN),
-            ("Ticket Médio",  fmt_brl(m['ticket']),   m['ticket'],   m_ant['ticket'],   COR_PRIMARY),
-        ]
-        for col, (label, val_str, val, vant, cor) in zip([k1,k2,k3,k4], kpis_mp):
-            dv, dc = fmt_delta(val, vant)
-            col.markdown(f"""
-            <div class="kpi-card" style="--accent:{cor}">
-                <div class="kpi-label">{label}</div>
-                <div class="kpi-value">{val_str}</div>
-                <div class="kpi-delta {dc}">{dv or "—"}</div>
-            </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if "marketplace" in df_mp.columns:
-            # Receita por plataforma
-            st.markdown('<div class="section-label">Receita por Plataforma</div>', unsafe_allow_html=True)
-            mp_agg = (df_mp.groupby("marketplace")
-                      .agg(receita=("valor_linha","sum"),
-                           notas=("nota_fiscal","nunique"),
-                           itens=("quantidade","sum"))
-                      .reset_index().sort_values("receita", ascending=False))
-            mp_agg["ticket"] = mp_agg["receita"] / mp_agg["notas"].replace(0,np.nan)
-
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                fig_mp_bar = px.bar(
-                    mp_agg, x="receita", y="marketplace", orientation="h",
-                    color="receita",
-                    color_continuous_scale=[[0,"#0d1f0d"],[1,COR_MP]],
-                    labels={"receita":"Receita (R$)","marketplace":""},
-                    text=mp_agg["receita"].map(fmt_brl),
-                )
-                fig_mp_bar.update_traces(textposition="outside", textfont=dict(color="#9ca3b8"))
-                fig_mp_bar.update_layout(**{**PLOTLY_LAYOUT_INV, "coloraxis_showscale":False, "height":340})
-                st.plotly_chart(fig_mp_bar, use_container_width=True)
-
-            with col_m2:
-                fig_mp_pie = px.pie(
-                    mp_agg, names="marketplace", values="receita",
-                    color_discrete_sequence=PALETTE_MP + PALETTE_MIX, hole=0.6,
-                )
-                fig_mp_pie.update_traces(textinfo="percent+label", textfont_size=11)
-                fig_mp_pie.update_layout(**{**PLOTLY_LAYOUT, "height":340})
-                st.plotly_chart(fig_mp_pie, use_container_width=True)
-
-            # Evolução por plataforma
-            st.markdown('<div class="section-label">Evolução por Plataforma</div>', unsafe_allow_html=True)
-            ev_mp = df_mp.groupby(["data","marketplace"])["valor_linha"].sum().reset_index()
-            fig_ev_mp = px.line(
-                ev_mp, x="data", y="valor_linha", color="marketplace",
-                color_discrete_sequence=PALETTE_MP + PALETTE_MIX,
-                labels={"valor_linha":"Receita (R$)","data":"","marketplace":""},
+    if ec_m["total"] > 0:
+        taxa_fat_ec = pct(ec_m["fat"], ec_m["total"])
+        if taxa_fat_ec < 70:
+            st.markdown(
+                f"<div class='warn-card'>⚠️ Taxa de faturamento E-commerce em "
+                f"<strong>{taxa_fat_ec:.1f}%</strong> — {ec_m['pend']} pedidos pendentes.</div>",
+                unsafe_allow_html=True,
             )
-            fig_ev_mp.update_traces(line=dict(width=2.5))
-            fig_ev_mp.update_layout(**{**PLOTLY_LAYOUT, "height":260})
-            st.plotly_chart(fig_ev_mp, use_container_width=True)
 
-            # Tabela detalhada
-            st.markdown('<div class="section-label">Detalhamento por Plataforma</div>', unsafe_allow_html=True)
-            mp_exib = mp_agg.copy()
-            mp_exib["receita"] = mp_exib["receita"].map(fmt_brl)
-            mp_exib["ticket"]  = mp_exib["ticket"].map(fmt_brl)
-            mp_exib = mp_exib.rename(columns={"marketplace":"Marketplace","receita":"Receita",
-                                               "notas":"Notas Fiscais","itens":"Itens","ticket":"Ticket Médio"})
-            st.dataframe(mp_exib, use_container_width=True, hide_index=True)
-            st.download_button("📥 Exportar Marketplace", data=mp_exib.to_csv(index=False).encode("utf-8"),
-                               file_name="marketplace.csv", mime="text/csv")
+    st.markdown("---")
 
-# ─────────────────────────────────────────────
-# ABA 3 — DETALHADO
-# ─────────────────────────────────────────────
-with tabs[3]:
-    st.markdown('<div class="page-header"><p class="page-title">Detalhado</p><p class="page-subtitle">receita por marca (ecommerce) · receita por plataforma (marketplace)</p></div>', unsafe_allow_html=True)
+    col_ev1, col_ev2 = st.columns([3, 1])
+    with col_ev1:
+        st.markdown("""<div class="section-header"><h3>Evolução de Receita</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        fig_ev = go.Figure()
+        if not ec_period.empty and "data" in ec_period.columns:
+            ec_ts = (ec_period[ec_period["faturado"]]
+                     .groupby("data")["receita"].sum().reset_index())
+            fig_ev.add_trace(go.Scatter(
+                x=ec_ts["data"], y=ec_ts["receita"], name="E-commerce",
+                mode="lines", fill="tozeroy",
+                line=dict(color="#3b6fff", width=2.5, shape="spline", smoothing=1.2),
+                fillcolor="rgba(59,111,255,0.08)",
+            ))
+        if not mp_period.empty and "data" in mp_period.columns:
+            mp_ts = mp_period.groupby("data")["receita"].sum().reset_index()
+            fig_ev.add_trace(go.Scatter(
+                x=mp_ts["data"], y=mp_ts["receita"], name="Marketplace",
+                mode="lines", fill="tozeroy",
+                line=dict(color="#f59e0b", width=2.5, shape="spline", smoothing=1.2),
+                fillcolor="rgba(245,158,11,0.06)",
+            ))
+        fig_ev.update_layout(**L())
+        st.plotly_chart(fig_ev, use_container_width=True)
 
-    if st.session_state.df_ec.empty and st.session_state.df_mp.empty:
-        guard_sem_dados()
+    with col_ev2:
+        st.markdown("""<div class="section-header"><h3>Share por Canal</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        share_data = []
+        if v_ec > 0:
+            share_data.append({"canal": "E-commerce", "receita": v_ec})
+        if v_mp > 0:
+            share_data.append({"canal": "Marketplace", "receita": v_mp})
+        if share_data:
+            df_share = pd.DataFrame(share_data)
+            fig_share = px.pie(df_share, names="canal", values="receita",
+                               color="canal",
+                               color_discrete_map={"E-commerce":"#3b6fff","Marketplace":"#f59e0b"},
+                               hole=0.62)
+            fig_share.update_traces(textinfo="percent+label", textfont_size=11)
+            fig_share.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+            st.plotly_chart(fig_share, use_container_width=True)
+
+    st.markdown("---")
+
+    col_bar1, col_bar2 = st.columns(2)
+    with col_bar1:
+        st.markdown("""<div class="section-header"><h3>E-com: Receita por Origem (UTM)</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        if not ec_period.empty and "utmsource" in ec_period.columns:
+            utm_g = (ec_period[ec_period["faturado"]]
+                     .groupby("utmsource")
+                     .agg(receita=("receita","sum"), pedidos=("order","count"))
+                     .reset_index()
+                     .sort_values("receita", ascending=True))
+            fig_utm = px.bar(utm_g, x="receita", y="utmsource", orientation="h",
+                             color="utmsource", color_discrete_map=COR_CANAL,
+                             labels={"receita":"Receita (R$)","utmsource":"Origem"})
+            fig_utm.update_layout(**L_inv())
+            st.plotly_chart(fig_utm, use_container_width=True)
+
+    with col_bar2:
+        st.markdown("""<div class="section-header"><h3>Marketplace: Receita por Plataforma</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        if not mp_period.empty and "MARKETPLACE" in mp_period.columns:
+            mp_g = (mp_period.groupby("MARKETPLACE")
+                    .agg(receita=("receita","sum"))
+                    .reset_index()
+                    .sort_values("receita", ascending=True))
+            fig_mp_bar = px.bar(mp_g, x="receita", y="MARKETPLACE", orientation="h",
+                                color="MARKETPLACE", color_discrete_map=COR_MP,
+                                labels={"receita":"Receita (R$)","MARKETPLACE":"Plataforma"})
+            fig_mp_bar.update_layout(**L_inv())
+            st.plotly_chart(fig_mp_bar, use_container_width=True)
+
+
+with tab_ec:
+    if ec_period.empty:
+        st.info("Nenhum dado de E-commerce no período.")
+        st.stop()
+
+    st.markdown("""<div class="section-header"><h3>Métricas E-commerce</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    e1,e2,e3,e4,e5,e6 = st.columns(6)
+    e1.metric("💰 Receita Fat.",   fmt_brl(ec_m["receita"]),
+              delta=fmt_var(var_pct(ec_m["receita"],   ec_ma["receita"])))
+    e2.metric("📥 Pedidos",        f"{ec_m['total']:,}",
+              delta=fmt_var(var_pct(ec_m["total"],     ec_ma["total"])))
+    e3.metric("✅ Faturados",      f"{ec_m['fat']:,}",
+              delta=fmt_var(var_pct(ec_m["fat"],       ec_ma["fat"])))
+    e4.metric("⏳ Pendentes",      f"{ec_m['pend']:,}")
+    e5.metric("🎟️ Ticket Médio",  fmt_brl(ec_m["ticket"]),
+              delta=fmt_var(var_pct(ec_m["ticket"],    ec_ma["ticket"])))
+    e6.metric("📦 Itens Fat.",     f"{ec_m['itens']:,}",
+              delta=fmt_var(var_pct(ec_m["itens"],     ec_ma["itens"])))
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    ec_fat = ec_period[ec_period["faturado"]]
+    ec_fat_ant = ec_period_ant[ec_period_ant["faturado"]] if not ec_period_ant.empty else pd.DataFrame()
+
+    col_utm1, col_utm2 = st.columns(2)
+    with col_utm1:
+        st.markdown("""<div class="section-header"><h3>Pedidos Únicos por UTM Source</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        if not ec_fat.empty and "utmsource" in ec_fat.columns:
+            utm_pedidos = (ec_fat.groupby("utmsource")
+                          .agg(pedidos=("order","nunique"), receita=("receita","sum"))
+                          .reset_index()
+                          .sort_values("pedidos", ascending=False))
+            utm_pedidos["pct"] = utm_pedidos["pedidos"] / utm_pedidos["pedidos"].sum() * 100
+            fig_utm2 = px.bar(utm_pedidos, x="utmsource", y="pedidos",
+                              color="utmsource", color_discrete_map=COR_CANAL,
+                              labels={"pedidos":"Pedidos Faturados","utmsource":"Origem"},
+                              text=utm_pedidos["pedidos"].astype(str) + " (" + utm_pedidos["pct"].map("{:.0f}%".format) + ")")
+            fig_utm2.update_traces(textposition="outside")
+            fig_utm2.update_layout(**L())
+            st.plotly_chart(fig_utm2, use_container_width=True)
+
+            st.markdown("""<div class="section-header"><h3>Receita por UTM: Atual vs Anterior</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+            utm_a = ec_fat.groupby("utmsource")["receita"].sum().reset_index().rename(columns={"receita":"atual"})
+            utm_p = ec_fat_ant.groupby("utmsource")["receita"].sum().reset_index().rename(columns={"receita":"anterior"}) if not ec_fat_ant.empty else pd.DataFrame(columns=["utmsource","anterior"])
+            utm_comp = utm_a.merge(utm_p, on="utmsource", how="outer").fillna(0)
+            fig_utm_comp = go.Figure([
+                go.Bar(name="Anterior", x=utm_comp["utmsource"], y=utm_comp["anterior"],
+                       marker_color="rgba(100,116,139,0.35)", marker_line_width=0),
+                go.Bar(name="Atual",    x=utm_comp["utmsource"], y=utm_comp["atual"],
+                       marker_color=[COR_CANAL.get(c,"#3b6fff") for c in utm_comp["utmsource"]],
+                       marker_line_width=0),
+            ])
+            fig_utm_comp.update_layout(barmode="group", **L())
+            st.plotly_chart(fig_utm_comp, use_container_width=True)
+
+    with col_utm2:
+        st.markdown("""<div class="section-header"><h3>Receita por Origem</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        if not ec_fat.empty:
+            utm_pie = ec_fat.groupby("utmsource")["receita"].sum().reset_index()
+            fig_up = px.pie(utm_pie, names="utmsource", values="receita",
+                            color="utmsource", color_discrete_map=COR_CANAL, hole=0.55)
+            fig_up.update_traces(textinfo="percent+label", textfont_size=11)
+            fig_up.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+            st.plotly_chart(fig_up, use_container_width=True)
+
+        st.markdown("""<div class="section-header"><h3>Status dos Pedidos</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        if not ec_period.empty:
+            status_cnt = ec_period["faturado"].map({True:"Faturado",False:"Pendente"}).value_counts().reset_index()
+            status_cnt.columns = ["status","qtd"]
+            fig_status = px.pie(status_cnt, names="status", values="qtd",
+                                color="status",
+                                color_discrete_map={"Faturado":"#10b981","Pendente":"#f59e0b"},
+                                hole=0.55)
+            fig_status.update_traces(textinfo="percent+label", textfont_size=11)
+            fig_status.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+            st.plotly_chart(fig_status, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Evolução Diária — E-commerce</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    if not ec_fat.empty:
+        ec_daily = ec_fat.groupby("data").agg(receita=("receita","sum"), pedidos=("order","count")).reset_index()
+        fig_ec_daily = go.Figure()
+        fig_ec_daily.add_trace(go.Bar(
+            x=ec_daily["data"], y=ec_daily["receita"], name="Receita",
+            marker_color="#3b6fff", marker_opacity=0.8, yaxis="y",
+        ))
+        fig_ec_daily.add_trace(go.Scatter(
+            x=ec_daily["data"], y=ec_daily["pedidos"], name="Pedidos",
+            mode="lines+markers", line=dict(color="#10b981", width=2),
+            yaxis="y2",
+        ))
+        fig_ec_daily.update_layout(
+            **L(),
+            yaxis2=dict(overlaying="y", side="right", gridcolor="rgba(0,0,0,0)",
+                        tickcolor="#1e2d4a", linecolor="#1e2d4a"),
+        )
+        st.plotly_chart(fig_ec_daily, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Detalhamento de Pedidos</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    ec_disp = ec_period[["order","data","status","utmsource","receita","itens","state"]].copy()
+    ec_disp["receita"] = ec_disp["receita"].map(fmt_brl)
+    ec_disp = ec_disp.sort_values("data", ascending=False)
+    st.dataframe(ec_disp, use_container_width=True, hide_index=True)
+    st.download_button("📥 Exportar E-commerce",
+                       data=ec_period.to_csv(index=False).encode("utf-8"),
+                       file_name="ecommerce_periodo.csv", mime="text/csv")
+
+    if has_ec and not df_ec.empty:
+        st.markdown("""<div class="section-header"><h3>Receita por Marca — E-commerce</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        df_ec_f = filter_period(df_ec, data_inicio, data_fim)
+        if not df_ec_f.empty and "brand" in df_ec_f.columns:
+            brand_rec = (df_ec_f[df_ec_f["faturado"]]
+                        .groupby(["order","brand"])["line_total"].sum()
+                        .reset_index()
+                        .groupby("brand")["line_total"].sum()
+                        .reset_index()
+                        .rename(columns={"line_total":"receita"})
+                        .sort_values("receita", ascending=False))
+            fig_brand = px.bar(brand_rec, x="brand", y="receita",
+                               labels={"receita":"Receita (R$)","brand":"Marca"},
+                               color="brand",
+                               color_discrete_sequence=["#3b6fff","#f59e0b","#10b981","#f43f5e"])
+            fig_brand.update_layout(**L())
+            st.plotly_chart(fig_brand, use_container_width=True)
+
+
+with tab_mp:
+    if mp_period.empty:
+        st.info("Nenhum dado de Marketplace no período.")
+        st.stop()
+
+    st.markdown("""<div class="section-header"><h3>Métricas Marketplace</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric("💰 Receita",        fmt_brl(mp_m["receita"]),
+              delta=fmt_var(var_pct(mp_m["receita"], mp_ma["receita"])))
+    m2.metric("📑 Notas Fiscais",  f"{mp_m['total']:,}",
+              delta=fmt_var(var_pct(mp_m["total"],   mp_ma["total"])))
+    m3.metric("📦 Itens",          f"{mp_m['itens']:,}",
+              delta=fmt_var(var_pct(mp_m["itens"],   mp_ma["itens"])))
+    m4.metric("🎟️ Ticket NF",     fmt_brl(mp_m["ticket"]),
+              delta=fmt_var(var_pct(mp_m["ticket"],  mp_ma["ticket"])))
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col_mp1, col_mp2 = st.columns(2)
+    with col_mp1:
+        st.markdown("""<div class="section-header"><h3>Receita por Plataforma</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        plat_g = (mp_period.groupby("MARKETPLACE")
+                  .agg(receita=("receita","sum"), notas=("nota","nunique"), itens=("itens","sum"))
+                  .reset_index()
+                  .sort_values("receita", ascending=False))
+        fig_plat = px.bar(plat_g, x="MARKETPLACE", y="receita",
+                          color="MARKETPLACE", color_discrete_map=COR_MP,
+                          labels={"receita":"Receita (R$)","MARKETPLACE":""},
+                          text=plat_g["receita"].map(lambda x: f"R$ {x:,.0f}"))
+        fig_plat.update_traces(textposition="outside")
+        fig_plat.update_layout(**L())
+        st.plotly_chart(fig_plat, use_container_width=True)
+
+    with col_mp2:
+        st.markdown("""<div class="section-header"><h3>Share por Plataforma</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+        fig_plat_pie = px.pie(plat_g, names="MARKETPLACE", values="receita",
+                              color="MARKETPLACE", color_discrete_map=COR_MP, hole=0.55)
+        fig_plat_pie.update_traces(textinfo="percent+label", textfont_size=11)
+        fig_plat_pie.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+        st.plotly_chart(fig_plat_pie, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Evolução Diária — Marketplace</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    mp_daily = mp_period.groupby(["data","MARKETPLACE"])["receita"].sum().reset_index()
+    fig_mp_daily = px.area(mp_daily, x="data", y="receita", color="MARKETPLACE",
+                           color_discrete_map=COR_MP,
+                           labels={"receita":"Receita (R$)","data":""})
+    fig_mp_daily.update_layout(**L())
+    st.plotly_chart(fig_mp_daily, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Atual vs Período Anterior — por Plataforma</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    mp_a_agg = mp_period.groupby("MARKETPLACE")["receita"].sum().reset_index().rename(columns={"receita":"atual"})
+    mp_p_agg = (mp_period_ant.groupby("MARKETPLACE")["receita"].sum().reset_index().rename(columns={"receita":"anterior"})
+                if not mp_period_ant.empty else pd.DataFrame(columns=["MARKETPLACE","anterior"]))
+    mp_comp = mp_a_agg.merge(mp_p_agg, on="MARKETPLACE", how="outer").fillna(0)
+    mp_comp["var"] = mp_comp.apply(
+        lambda r: fmt_var(var_pct(r["atual"], r["anterior"])) or "—", axis=1)
+    fig_mp_comp = go.Figure([
+        go.Bar(name="Anterior", x=mp_comp["MARKETPLACE"], y=mp_comp["anterior"],
+               marker_color="rgba(100,116,139,0.35)", marker_line_width=0),
+        go.Bar(name="Atual",    x=mp_comp["MARKETPLACE"], y=mp_comp["atual"],
+               marker_color=[COR_MP.get(c,"#f59e0b") for c in mp_comp["MARKETPLACE"]],
+               marker_line_width=0, text=mp_comp["var"], textposition="outside"),
+    ])
+    fig_mp_comp.update_layout(barmode="group", **L())
+    st.plotly_chart(fig_mp_comp, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Detalhamento por Nota Fiscal</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    mp_disp = mp_period[["nota","data","MARKETPLACE","receita","itens"]].copy()
+    mp_disp["receita"] = mp_disp["receita"].map(fmt_brl)
+    mp_disp = mp_disp.sort_values("data", ascending=False)
+    st.dataframe(mp_disp, use_container_width=True, hide_index=True)
+    st.download_button("📥 Exportar Marketplace",
+                       data=mp_period.to_csv(index=False).encode("utf-8"),
+                       file_name="marketplace_periodo.csv", mime="text/csv")
+
+
+with tab_produtos:
+    if not has_ec or df_ec.empty:
+        st.info("Dados de E-commerce necessários para análise de produtos.")
+        st.stop()
+
+    df_ec_f = filter_period(df_ec, data_inicio, data_fim)
+    df_ec_f_ant = filter_period(df_ec, ini_ant, fim_ant)
+
+    if df_ec_f.empty:
+        st.info("Sem dados de produtos no período.")
+        st.stop()
+
+    df_ec_fat = df_ec_f[df_ec_f["faturado"]]
+
+    col_pf1, col_pf2 = st.columns([3,1])
+    with col_pf1:
+        marcas_disp = sorted(df_ec_fat["brand"].dropna().unique().tolist()) if "brand" in df_ec_fat.columns else []
+        marcas_sel_p = st.multiselect("Filtrar por marca", marcas_disp, default=marcas_disp, key="prod_brand")
+    with col_pf2:
+        top_n_p = st.selectbox("Top N", [5,10,15,20], index=1, key="top_n_prod")
+
+    df_prod = df_ec_fat[df_ec_fat["brand"].isin(marcas_sel_p)] if marcas_sel_p else df_ec_fat
+
+    st.markdown("""<div class="section-header"><h3>Top Produtos por Receita e Quantidade</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    cp1, cp2 = st.columns(2)
+    with cp1:
+        top_rec_p = (df_prod.groupby(["brand","product_name"])["line_total"]
+                    .sum().reset_index()
+                    .sort_values("line_total", ascending=False).head(top_n_p))
+        fig_pr = px.bar(top_rec_p, x="line_total", y="product_name", color="brand",
+                        orientation="h",
+                        color_discrete_sequence=["#3b6fff","#f59e0b","#10b981","#f43f5e"],
+                        labels={"line_total":"Receita (R$)","product_name":"","brand":"Marca"})
+        fig_pr.update_layout(**L_inv(title="Receita por Produto"))
+        st.plotly_chart(fig_pr, use_container_width=True)
+
+    with cp2:
+        top_qtd_p = (df_prod.groupby(["brand","product_name"])["quantity_sku"]
+                    .sum().reset_index()
+                    .sort_values("quantity_sku", ascending=False).head(top_n_p))
+        fig_pq = px.bar(top_qtd_p, x="quantity_sku", y="product_name", color="brand",
+                        orientation="h",
+                        color_discrete_sequence=["#3b6fff","#f59e0b","#10b981","#f43f5e"],
+                        labels={"quantity_sku":"Unidades","product_name":"","brand":"Marca"})
+        fig_pq.update_layout(**L_inv(title="Volume por Produto"))
+        st.plotly_chart(fig_pq, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Análise 80/20 de Receita</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    prod_rec = (df_prod.groupby("product_name")["line_total"].sum()
+               .sort_values(ascending=False).reset_index())
+    total_r = prod_rec["line_total"].sum()
+    if total_r > 0:
+        prod_rec["cum_pct"] = prod_rec["line_total"].cumsum() / total_r * 100
+        prod_rec["pct"]     = prod_rec["line_total"] / total_r * 100
+        n80 = int((prod_rec["cum_pct"] <= 80).sum()) + 1
+        pct_cat = n80 / len(prod_rec) * 100
+        st.markdown(
+            f"<div class='insight-card'>📐 <strong>Concentração de Pareto:</strong> "
+            f"<strong>{n80} produto(s) ({pct_cat:.0f}% do catálogo)</strong> "
+            f"correspondem a 80% da receita faturada no período.</div>",
+            unsafe_allow_html=True,
+        )
+        fig_pareto = go.Figure()
+        fig_pareto.add_trace(go.Bar(
+            x=prod_rec["product_name"].str[:40], y=prod_rec["line_total"],
+            marker_color="#3b6fff", name="Receita", opacity=0.85,
+        ))
+        fig_pareto.add_trace(go.Scatter(
+            x=prod_rec["product_name"].str[:40], y=prod_rec["cum_pct"],
+            mode="lines+markers", name="% Acumulado",
+            line=dict(color="#f59e0b", width=2),
+            yaxis="y2",
+        ))
+        fig_pareto.add_hline(y=80, line_dash="dot", line_color="#f43f5e",
+                             annotation_text="80%", yref="y2",
+                             annotation=dict(font_color="#f43f5e"))
+        fig_pareto.update_layout(
+            **L(),
+            xaxis_tickangle=-30,
+            yaxis2=dict(overlaying="y", side="right", range=[0,105],
+                        ticksuffix="%", gridcolor="rgba(0,0,0,0)",
+                        tickcolor="#1e2d4a", linecolor="#1e2d4a"),
+        )
+        st.plotly_chart(fig_pareto, use_container_width=True)
+
+    st.markdown("""<div class="section-header"><h3>Tabela Detalhada por SKU</h3><div class="divider"></div></div>""", unsafe_allow_html=True)
+    sku_tab = (df_prod.groupby(["brand","sku","product_name"])
+              .agg(
+                  receita=("line_total","sum"),
+                  qtd=("quantity_sku","sum"),
+                  pedidos=("order","nunique"),
+              ).reset_index()
+              .sort_values("receita", ascending=False))
+
+    if not df_ec_f_ant.empty:
+        df_fat_ant = df_ec_f_ant[df_ec_f_ant["faturado"]]
+        sku_ant = (df_fat_ant.groupby("sku")["line_total"].sum()
+                  .reset_index().rename(columns={"line_total":"receita_ant"}))
+        sku_tab = sku_tab.merge(sku_ant, on="sku", how="left").fillna(0)
+        sku_tab["var_vs_ant"] = sku_tab.apply(
+            lambda r: fmt_var(var_pct(r["receita"], r["receita_ant"])) or "—", axis=1)
     else:
-        d_ini, d_fim = seletor_periodo("det")
-        df_ec = filtrar_data(st.session_state.df_ec, d_ini, d_fim)
-        df_mp = filtrar_data(st.session_state.df_mp, d_ini, d_fim)
-        df_ec_ant = filtrar_data(st.session_state.df_ec, *periodo_anterior(d_ini, d_fim))
-        df_mp_ant = filtrar_data(st.session_state.df_mp, *periodo_anterior(d_ini, d_fim))
+        sku_tab["var_vs_ant"] = "—"
 
-        # ── E-commerce: receita por marca ──
-        if not df_ec.empty:
-            st.markdown('<div class="section-label"><span class="platform-pill pill-ec">E-commerce</span> Receita por Marca</div>', unsafe_allow_html=True)
+    sku_tab["ticket_medio"] = (sku_tab["receita"] / sku_tab["pedidos"].replace(0, np.nan)).fillna(0)
+    sku_tab_disp = sku_tab.copy()
+    sku_tab_disp["receita"]      = sku_tab_disp["receita"].map(fmt_brl)
+    sku_tab_disp["ticket_medio"] = sku_tab_disp["ticket_medio"].map(fmt_brl)
+    sku_tab_disp = sku_tab_disp.rename(columns={
+        "brand":"Marca","sku":"SKU","product_name":"Produto",
+        "receita":"Receita","qtd":"Qtd","pedidos":"Pedidos",
+        "ticket_medio":"Ticket Médio","var_vs_ant":"Var. vs Ant.",
+    })
+    st.dataframe(sku_tab_disp, use_container_width=True, hide_index=True)
+    st.download_button("📥 Exportar SKUs",
+                       data=sku_tab.to_csv(index=False).encode("utf-8"),
+                       file_name="skus_periodo.csv", mime="text/csv")
 
-            col_marca = next((c for c in ["marca","seller_name","brand"] if c in df_ec.columns), None)
-            if col_marca and col_marca != "marca":
-                df_ec = df_ec.rename(columns={col_marca:"marca"})
-                col_marca = "marca"
-
-            if col_marca:
-                df_fat_ec = df_ec[df_ec["faturado"]] if "faturado" in df_ec.columns else df_ec
-                # Valor real por order por marca
-                marca_order = df_fat_ec.drop_duplicates(subset=["order","marca"] if "marca" in df_fat_ec.columns else ["order"])
-                val_order = df_fat_ec.groupby("order")["valor_linha"].sum().reset_index()
-                if "marca" in df_fat_ec.columns:
-                    marca_map = df_fat_ec.drop_duplicates("order").set_index("order")["marca"]
-                    val_order["marca"] = val_order["order"].map(marca_map)
-                    marca_agg = (val_order.groupby("marca")
-                                 .agg(receita=("valor_linha","sum"), pedidos=("order","nunique"))
-                                 .reset_index().sort_values("receita",ascending=False))
-                    marca_agg["ticket"] = marca_agg["receita"] / marca_agg["pedidos"].replace(0,np.nan)
-                    marca_agg["pct"]    = marca_agg["receita"] / marca_agg["receita"].sum() * 100
-
-                    col_d1, col_d2 = st.columns([3,2])
-                    with col_d1:
-                        # Atual vs anterior por marca
-                        df_fat_ant = df_ec_ant[df_ec_ant["faturado"]] if ("faturado" in df_ec_ant.columns and not df_ec_ant.empty) else df_ec_ant
-                        if not df_ec_ant.empty and "marca" in df_ec_ant.columns:
-                            va_order = df_fat_ant.groupby("order")["valor_linha"].sum().reset_index()
-                            if not va_order.empty:
-                                marca_map_ant = df_fat_ant.drop_duplicates("order").set_index("order").get("marca", pd.Series(dtype=str))
-                                va_order["marca"] = va_order["order"].map(marca_map_ant)
-                                marca_ant = (va_order.groupby("marca")["valor_linha"].sum()
-                                             .reset_index().rename(columns={"valor_linha":"rec_ant"}))
-                                m_comp = marca_agg.merge(marca_ant, on="marca", how="left").fillna(0)
-                            else:
-                                m_comp = marca_agg.copy(); m_comp["rec_ant"] = 0
-                        else:
-                            m_comp = marca_agg.copy(); m_comp["rec_ant"] = 0
-
-                        fig_mc = go.Figure([
-                            go.Bar(name="Período ant.", x=m_comp["marca"], y=m_comp["rec_ant"],
-                                   marker_color="rgba(99,102,241,0.18)", marker_line_width=0),
-                            go.Bar(name="Atual", x=m_comp["marca"], y=m_comp["receita"],
-                                   marker_color=COR_EC, marker_line_width=0),
-                        ])
-                        fig_mc.update_layout(barmode="group", **{**PLOTLY_LAYOUT, "height":280})
-                        st.plotly_chart(fig_mc, use_container_width=True)
-
-                    with col_d2:
-                        fig_mc_pie = px.pie(marca_agg, names="marca", values="receita",
-                                            color_discrete_sequence=PALETTE_EC + PALETTE_MIX,
-                                            hole=0.6)
-                        fig_mc_pie.update_traces(textinfo="percent+label", textfont_size=11)
-                        fig_mc_pie.update_layout(**{**PLOTLY_LAYOUT, "height":280})
-                        st.plotly_chart(fig_mc_pie, use_container_width=True)
-
-                    # Tabela marcas
-                    m_exib = marca_agg.copy()
-                    m_exib["receita"] = m_exib["receita"].map(fmt_brl)
-                    m_exib["ticket"]  = m_exib["ticket"].map(fmt_brl)
-                    m_exib["pct"]     = m_exib["pct"].map("{:.1f}%".format)
-                    m_exib = m_exib.rename(columns={"marca":"Marca","pedidos":"Pedidos","receita":"Receita",
-                                                     "ticket":"Ticket Médio","pct":"Share"})
-                    st.dataframe(m_exib, use_container_width=True, hide_index=True)
-                    st.download_button("📥 Exportar por Marca",
-                                       data=m_exib.to_csv(index=False).encode("utf-8"),
-                                       file_name="ec_por_marca.csv", mime="text/csv")
-            else:
-                st.info("Coluna de marca/seller não encontrada na planilha de e-commerce.")
-
-        # ── Marketplace: receita por plataforma ──
-        if not df_mp.empty:
-            st.markdown('<div class="section-label" style="margin-top:32px"><span class="platform-pill pill-mp">Marketplace</span> Receita por Plataforma</div>', unsafe_allow_html=True)
-
-            if "marketplace" in df_mp.columns:
-                mp_det = (df_mp.groupby("marketplace")
-                          .agg(receita=("valor_linha","sum"),
-                               notas=("nota_fiscal","nunique"),
-                               itens=("quantidade","sum"))
-                          .reset_index().sort_values("receita",ascending=False))
-                mp_det["ticket"] = mp_det["receita"] / mp_det["notas"].replace(0,np.nan)
-                mp_det["pct"]    = mp_det["receita"] / mp_det["receita"].sum() * 100
-
-                # Atual vs anterior
-                if not df_mp_ant.empty and "marketplace" in df_mp_ant.columns:
-                    mp_ant = (df_mp_ant.groupby("marketplace")["valor_linha"].sum()
-                              .reset_index().rename(columns={"valor_linha":"rec_ant"}))
-                    mp_comp = mp_det.merge(mp_ant, on="marketplace", how="left").fillna(0)
-                else:
-                    mp_comp = mp_det.copy(); mp_comp["rec_ant"] = 0
-
-                col_mp1, col_mp2 = st.columns([3,2])
-                with col_mp1:
-                    fig_mpd = go.Figure([
-                        go.Bar(name="Período ant.", x=mp_comp["marketplace"], y=mp_comp["rec_ant"],
-                               marker_color="rgba(74,222,128,0.15)", marker_line_width=0),
-                        go.Bar(name="Atual", x=mp_comp["marketplace"], y=mp_comp["receita"],
-                               marker_color=COR_MP, marker_line_width=0),
-                    ])
-                    fig_mpd.update_layout(barmode="group", **{**PLOTLY_LAYOUT, "height":280})
-                    st.plotly_chart(fig_mpd, use_container_width=True)
-
-                with col_mp2:
-                    fig_mpd_pie = px.pie(mp_det, names="marketplace", values="receita",
-                                         color_discrete_sequence=PALETTE_MP + PALETTE_MIX, hole=0.6)
-                    fig_mpd_pie.update_traces(textinfo="percent+label", textfont_size=11)
-                    fig_mpd_pie.update_layout(**{**PLOTLY_LAYOUT, "height":280})
-                    st.plotly_chart(fig_mpd_pie, use_container_width=True)
-
-                # Tabela plataformas
-                mp_exib2 = mp_det.copy()
-                if "rec_ant" in mp_comp.columns:
-                    mp_exib2 = mp_exib2.merge(mp_comp[["marketplace","rec_ant"]], on="marketplace", how="left")
-                    mp_exib2["var"] = mp_exib2.apply(
-                        lambda r: fmt_delta(r["receita"], r.get("rec_ant",0))[0] or "—", axis=1)
-                mp_exib2["receita"] = mp_exib2["receita"].map(fmt_brl)
-                mp_exib2["ticket"]  = mp_exib2["ticket"].map(fmt_brl)
-                mp_exib2["pct"]     = mp_exib2["pct"].map("{:.1f}%".format)
-                rename_mp = {"marketplace":"Marketplace","receita":"Receita","notas":"Notas",
-                             "itens":"Itens","ticket":"Ticket Médio","pct":"Share","var":"Var. vs Ant."}
-                mp_exib2 = mp_exib2.rename(columns=rename_mp)
-                cols_show = [c for c in ["Marketplace","Receita","Notas","Itens","Ticket Médio","Share","Var. vs Ant."]
-                             if c in mp_exib2.columns]
-                st.dataframe(mp_exib2[cols_show], use_container_width=True, hide_index=True)
-                st.download_button("📥 Exportar por Plataforma",
-                                   data=mp_exib2[cols_show].to_csv(index=False).encode("utf-8"),
-                                   file_name="mp_por_plataforma.csv", mime="text/csv")
-
-# ─────────────────────────────────────────────
-# RODAPÉ
-# ─────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;color:#1e2030;font-size:.72rem;"
-    "font-family:IBM Plex Mono,monospace;padding:10px 0 20px;'>"
-    "⌚ Grupo Seculus · Dashboard v2 · cache 5 min"
+    "<div style='text-align:center;color:#1e2d4a;font-size:.72rem;font-family:DM Mono,monospace;'>"
+    "⌚ Grupo Seculus · Sales Intelligence · Cache 5min · "
+    "Livelo e sites próprios excluídos automaticamente"
     "</div>",
     unsafe_allow_html=True,
 )
