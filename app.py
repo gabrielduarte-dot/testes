@@ -47,9 +47,43 @@ def normalize_str(s):
     return s.lower().strip().replace(" ", "_")
 
 
+def convert_gsheets_url(url: str) -> str:
+    """
+    Converte qualquer URL do Google Sheets para o link de exportação CSV.
+    Aceita:
+      - /edit, /view, /preview  → troca por /export?format=csv
+      - URL já com /export       → mantém
+      - Outras URLs              → retorna sem alteração
+    Preserva o parâmetro gid (aba) se presente.
+    """
+    import re
+    if "docs.google.com/spreadsheets" not in url:
+        return url
+
+    # extrai sheet id
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    if not m:
+        return url
+    sheet_id = m.group(1)
+
+    # extrai gid (aba) se houver
+    gid_match = re.search(r"[#&?]gid=(\d+)", url)
+    gid = gid_match.group(1) if gid_match else "0"
+
+    return (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+        f"/export?format=csv&gid={gid}"
+    )
+
+
 @st.cache_data(ttl=300)
 def load_csv(url):
-    r = requests.get(url)
+    url = convert_gsheets_url(url)
+    r = requests.get(url, allow_redirects=True)
+
+    if r.status_code != 200:
+        raise ValueError(f"Erro HTTP {r.status_code} ao acessar: {url}")
+
     # tenta detectar encoding; fallback para latin-1 (comum em CSVs BR)
     try:
         text = r.content.decode("utf-8")
