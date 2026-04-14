@@ -76,6 +76,63 @@ c3, c4 = st.columns(2)
 data_ini = c3.date_input("Data início")
 data_fim = c4.date_input("Data fim")
 
+# ─────────────────────────────
+# MODELO DAS PLANILHAS (AJUDA)
+# ─────────────────────────────
+with st.expander("📄 Modelo das planilhas esperadas", expanded=False):
+
+    st.markdown("### 🛒 Ecommerce")
+
+    df_model_ecom = pd.DataFrame({
+        "order": ["12345"],
+        "creation": ["2024-01-01"],
+        "client name": ["João"],
+        "uf": ["SP"],
+        "status": ["Faturado"],
+        "utmsource": ["google"],
+        "coupon": ["DESC10"],
+        "payment system name": ["credit card"],
+        "installments": [1],
+        "quantity_sku": [2],
+        "id_sku": ["SKU123"],
+        "reference code": ["REF1"],
+        "sku name": ["Produto X"],
+        "sku selling price": [100.0],
+        "sku total price": [200.0],
+        "discounts names": [""],
+        "seller name": ["Marca A"],
+        "marketingtags": [""]
+    })
+
+    st.dataframe(df_model_ecom, use_container_width=True)
+
+    st.markdown("### 🏪 Marketplace")
+
+    df_model_market = pd.DataFrame({
+        "data do faturamento": ["2024-01-01"],
+        "nota fiscal": ["NF123"],
+        "quantidade faturada": [2],
+        "valor unitário final": [150.0],
+        "marketplace": ["Mercado Livre"]
+    })
+
+    st.dataframe(df_model_market, use_container_width=True)
+
+    st.markdown("""
+    ⚠️ **Regras importantes aplicadas automaticamente:**
+
+    **Ecommerce**
+    - Ignora pedidos com `marketingtags` preenchido (ex: Livelo)
+    - Receita = `sku selling price × quantity_sku`
+    - Agrupamento por `order`
+    - UTM avaliado sem duplicidade
+
+    **Marketplace**
+    - Ignora: Site Mondaine, Site Seculus, Site Timex
+    - Receita = `valor unitário final × quantidade faturada`
+    - Baseado em Nota Fiscal
+    """)
+
 if not url_ecom or not url_market:
     st.stop()
 
