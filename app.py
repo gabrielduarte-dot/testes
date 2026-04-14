@@ -55,8 +55,18 @@ body {background-color:#0f1117;color:#fff;}
 def load_csv(url):
     r = requests.get(url)
     df = pd.read_csv(StringIO(r.text))
-    df.columns = df.columns.str.lower().str.strip()
+    df.columns = (
+    df.columns
+    .str.lower()
+    .str.strip()
+    .str.replace(" ", "_")
+)
     return df
+    def get_col(df, possible_names):
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return None
 
 # ─────────────────────────────
 # HEADER
@@ -89,8 +99,8 @@ df_market = load_csv(url_market)
 # TRATAMENTO ECOMMERCE
 # ─────────────────────────────
 
-df_ecom = df_ecom[df_ecom["marketingtags"].fillna("") == ""]
-
+if "marketingtags" in df_ecom.columns:
+    df_ecom = df_ecom[df_ecom["marketingtags"].fillna("") == ""]
 df_ecom["creation"] = pd.to_datetime(df_ecom["creation"], errors="coerce")
 
 df_ecom = df_ecom[
@@ -98,9 +108,32 @@ df_ecom = df_ecom[
     (df_ecom["creation"].dt.date <= data_fim)
 ]
 
-df_ecom["receita"] = (
-    df_ecom["sku selling price"] *
-    df_ecom["quantity_sku"]
+# detectar colunas
+col_price = get_col(df_ecom, ["sku_selling_price"])
+col_qty   = get_col(df_ecom, ["quantity_sku"])
+col_tag   = get_col(df_ecom, ["marketingtags"])
+col_order = get_col(df_ecom, ["order"])
+col_utm   = get_col(df_ecom, ["utmsource"])
+col_brand = get_col(df_ecom, ["seller_name"])
+
+# filtro Livelo
+if col_tag:
+    df_ecom = df_ecom[df_ecom[col_tag].fillna("") == ""]
+
+# garantir que colunas existem
+if not col_price or not col_qty or not col_order:
+    st.error("Colunas obrigatórias não encontradas no Ecommerce")
+    st.stop()
+
+# cálculo receita
+df_ecom["receita"] = df_ecom[col_price] * df_ecom[col_qty]
+
+# agrupamento correto
+df_ecom_group = df_ecom.groupby(col_order).agg({
+    "receita": "sum",
+    col_utm: "first" if col_utm else "count",
+    col_brand: "first" if col_brand else "count"
+}).reset_index()
 )
 
 # agrupar por pedido
