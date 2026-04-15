@@ -988,13 +988,11 @@ with tab_ec_tab:
     if ec_p.empty:
         st.info("Nenhuma nota fiscal de E-commerce no período selecionado.")
     else:
-        e1,e2,e3,e4,e5 = st.columns(5)
-        e1.metric("💰 Receita",     brl(ec_m["receita"]), delta=fv(vp(ec_m["receita"], ec_ma["receita"])))
-        e2.metric("📑 NFs",         f"{ec_m['total']:,}",  delta=fv(vp(ec_m["total"], ec_ma["total"])))
-        e3.metric("📦 Itens",       f"{ec_m['itens']:,}",  delta=fv(vp(ec_m["itens"], ec_ma["itens"])))
-        e4.metric("🎟️ Ticket NF",  brl(ec_m["ticket"]),  delta=fv(vp(ec_m["ticket"], ec_ma["ticket"])))
-        e5.metric("📊 Pedidos Fat.",f"{n_fat:,}" if has_ec else "—",
-                  delta=fv(vp(n_fat, n_fat_a)) if has_ec else None)
+        e1,e2,e3,e4 = st.columns(4)
+        e1.metric("💰 Receita",    brl(ec_m["receita"]), delta=fv(vp(ec_m["receita"], ec_ma["receita"])))
+        e2.metric("📑 NFs",        f"{ec_m['total']:,}",  delta=fv(vp(ec_m["total"], ec_ma["total"])))
+        e3.metric("📦 Itens",      f"{ec_m['itens']:,}",  delta=fv(vp(ec_m["itens"], ec_ma["itens"])))
+        e4.metric("🎟️ Ticket NF", brl(ec_m["ticket"]),  delta=fv(vp(ec_m["ticket"], ec_ma["ticket"])))
 
         st.markdown("<br>", unsafe_allow_html=True)
         ea1, ea2 = st.columns(2)
