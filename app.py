@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from io import StringIO
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import numpy as np
 
 st.set_page_config(
