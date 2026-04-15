@@ -55,6 +55,24 @@ hr{border-color:#1a2540!important;}
 .rc-green{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.25);}
 .rc-red{background:rgba(244,63,94,.15);color:#fb7185;border:1px solid rgba(244,63,94,.25);}
 .rc-amber{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.25);}
+.meta-panel{background:linear-gradient(135deg,#0d1321,#111827);border:1px solid #1e2d4a;border-radius:16px;padding:22px 26px;margin-bottom:16px;}
+.meta-panel-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#475569;margin:0 0 16px 0;}
+.meta-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.meta-card{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:12px;padding:16px 18px;transition:border-color .2s;}
+.meta-card:hover{border-color:#3b6fff;}
+.meta-card-label{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:6px;}
+.meta-card-value{font-size:1.35rem;font-weight:700;font-family:'DM Mono',monospace;color:#f1f5f9;line-height:1.1;margin-bottom:4px;}
+.meta-card-sub{font-size:.75rem;font-family:'DM Mono',monospace;font-weight:600;}
+.meta-card-sub.pos{color:#10b981;}
+.meta-card-sub.neg{color:#f43f5e;}
+.meta-card-sub.neu{color:#64748b;}
+.meta-card.highlight{border-color:#f43f5e;background:linear-gradient(135deg,#1a0a12,#1f0d18);}
+.meta-card.highlight .meta-card-value{color:#f43f5e;}
+.meta-card.ok{border-color:#10b981;background:linear-gradient(135deg,#0a1a14,#0d1f18);}
+.meta-card.ok .meta-card-value{color:#10b981;}
+.meta-bar-wrap{margin-top:10px;height:5px;border-radius:3px;background:#1e2d4a;overflow:hidden;}
+.meta-bar-fill{height:100%;border-radius:3px;transition:width .4s;}
+.meta-sep{border:none;border-top:1px solid #1a2540;margin:16px 0;}
 .prod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:12px;}
 .prod-card{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:14px;overflow:hidden;transition:all .25s;display:flex;flex-direction:column;}
 .prod-card:hover{border-color:#3b6fff;box-shadow:0 0 20px rgba(59,111,255,.12);transform:translateY(-2px);}
@@ -104,6 +122,7 @@ COR_MP = {
 }
 IMG_BASE_URL = "https://storage.googleapis.com/banco-imagens/Relogios"
 IMG_EXT      = ".jpg"
+META_URL = "https://docs.google.com/spreadsheets/d/1r4WwX_UjF12weYCYn3P5D2BzAJUhXrdJ2oQk95CgupE/export?format=csv"
 
 EC_COLS_19 = [
     "order","created_at","customer_name","state","status","utmsource",
@@ -180,6 +199,76 @@ def prev_p(ini, fim, modo):
 
 def sh(title):
     st.markdown(f'<div class="sh"><h4>{title}</h4><div class="ln"></div></div>', unsafe_allow_html=True)
+
+def parse_num_br(s):
+    try:
+        return float(str(s).replace(".","").replace(",","."))
+    except Exception:
+        return 0.0
+
+@st.cache_data(ttl=3600)
+def load_metas() -> pd.DataFrame:
+    try:
+        r = requests.get(META_URL, timeout=15, headers={"User-Agent":"Mozilla/5.0"})
+        r.raise_for_status()
+        try:    text = r.content.decode("utf-8")
+        except: text = r.content.decode("latin-1")
+        df = pd.read_csv(StringIO(text))
+        df.columns = [c.strip() for c in df.columns]
+        df["mes_dt"] = pd.to_datetime(df["Mês"], dayfirst=True, errors="coerce")
+        for col in ["Meta B2C","Meta MKT PLACE","META TOTAL",
+                    "Realizado B2C","Realizado MKT PLACE","Realizado REAL TOTAL","DIF"]:
+            if col in df.columns:
+                df[col] = df[col].apply(parse_num_br)
+        return df.dropna(subset=["mes_dt"])
+    except Exception as e:
+        return pd.DataFrame()
+
+def metas_do_mes(df_meta: pd.DataFrame, ano: int, mes: int) -> dict:
+    row = df_meta[(df_meta["mes_dt"].dt.year == ano) & (df_meta["mes_dt"].dt.month == mes)]
+    if row.empty:
+        return {"meta_ec":0,"meta_mkt":0,"meta_total":0,
+                "real_ec":0,"real_mkt":0,"real_total":0,"dif":0}
+    r = row.iloc[0]
+    return {
+        "meta_ec":    float(r.get("Meta B2C",0) or 0),
+        "meta_mkt":   float(r.get("Meta MKT PLACE",0) or 0),
+        "meta_total": float(r.get("META TOTAL",0) or 0),
+        "real_ec":    float(r.get("Realizado B2C",0) or 0),
+        "real_mkt":   float(r.get("Realizado MKT PLACE",0) or 0),
+        "real_total": float(r.get("Realizado REAL TOTAL",0) or 0),
+        "dif":        float(r.get("DIF",0) or 0),
+    }
+
+def metas_acumulado(df_meta: pd.DataFrame, ano: int, ate_mes: int) -> dict:
+    rows = df_meta[(df_meta["mes_dt"].dt.year == ano) & (df_meta["mes_dt"].dt.month <= ate_mes)]
+    if rows.empty:
+        return {"meta_ec":0,"meta_mkt":0,"meta_total":0,
+                "real_ec":0,"real_mkt":0,"real_total":0,"dif":0}
+    return {
+        "meta_ec":    float(rows["Meta B2C"].sum()),
+        "meta_mkt":   float(rows["Meta MKT PLACE"].sum()),
+        "meta_total": float(rows["META TOTAL"].sum()),
+        "real_ec":    float(rows["Realizado B2C"].sum()),
+        "real_mkt":   float(rows["Realizado MKT PLACE"].sum()),
+        "real_total": float(rows["Realizado REAL TOTAL"].sum()),
+        "dif":        float(rows["DIF"].sum()),
+    }
+
+def metas_ano(df_meta: pd.DataFrame, ano: int) -> dict:
+    rows = df_meta[df_meta["mes_dt"].dt.year == ano]
+    if rows.empty:
+        return {"meta_ec":0,"meta_mkt":0,"meta_total":0,
+                "real_ec":0,"real_mkt":0,"real_total":0,"dif":0}
+    return {
+        "meta_ec":    float(rows["Meta B2C"].sum()),
+        "meta_mkt":   float(rows["Meta MKT PLACE"].sum()),
+        "meta_total": float(rows["META TOTAL"].sum()),
+        "real_ec":    float(rows["Realizado B2C"].sum()),
+        "real_mkt":   float(rows["Realizado MKT PLACE"].sum()),
+        "real_total": float(rows["Realizado REAL TOTAL"].sum()),
+        "dif":        float(rows["DIF"].sum()),
+    }
 
 for k, v in [("df_mp_raw", None),("df_ec_raw", None),("ts_mp", None),("ts_ec", None)]:
     if k not in st.session_state:
@@ -503,24 +592,11 @@ hoje = datetime.today().date()
 if "d_ini" not in st.session_state: st.session_state.d_ini = hoje - timedelta(days=30)
 if "d_fim" not in st.session_state: st.session_state.d_fim = hoje
 
-fr = st.columns([2, 2, 2, 1, 1, 1, 1, 1])
+fr = st.columns([2, 2, 3])
 with fr[0]: data_ini = st.date_input("De",  value=st.session_state.d_ini, key="d_ini")
 with fr[1]: data_fim = st.date_input("Até", value=st.session_state.d_fim, key="d_fim")
 with fr[2]: comp_modo = st.selectbox("Comparar com",
     ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"], key="comp")
-
-for col_idx, (lbl, d, f) in enumerate([
-    ("7d",  hoje-timedelta(days=7),  hoje),
-    ("30d", hoje-timedelta(days=30), hoje),
-    ("Mês", hoje.replace(day=1),     hoje),
-    ("Ano", hoje.replace(month=1,day=1), hoje),
-    ("Hoje",hoje,                    hoje),
-], start=3):
-    with fr[col_idx]:
-        if st.button(lbl, key=f"atalho_{lbl}"):
-            st.session_state.d_ini = d
-            st.session_state.d_fim = f
-            st.rerun()
 
 ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
 
@@ -539,30 +615,113 @@ total_rec_ant = ec_ma["receita"] + mp_ma["receita"]
 
 ec_p_ec  = fdt(df_ec, data_ini, data_fim) if not df_ec.empty else pd.DataFrame()
 ec_fat   = ec_p_ec[ec_p_ec["faturado"]].copy() if not ec_p_ec.empty else pd.DataFrame()
-n_fat    = int(ec_fat["order"].nunique())    if not ec_fat.empty else 0
-n_tot    = int(ec_p_ec["order"].nunique())   if not ec_p_ec.empty else 0
-n_pend   = n_tot - n_fat
 
 ec_pa_ec = fdt(df_ec, ini_ant, fim_ant) if not df_ec.empty else pd.DataFrame()
 ec_fat_a = ec_pa_ec[ec_pa_ec["faturado"]] if not ec_pa_ec.empty else pd.DataFrame()
-n_fat_a  = int(ec_fat_a["order"].nunique()) if not ec_fat_a.empty else 0
 
 st.markdown("---")
-tab_geral, tab_ec_tab, tab_mp_tab, tab_prod = st.tabs([
-    "📊 Visão Geral", "🛒 E-commerce", "🏪 Marketplace", "🏆 Produtos & SKUs",
+tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod = st.tabs([
+    "📊 Visão Geral", "🎯 Metas", "🛒 E-commerce", "🏪 Marketplace", "🏆 Produtos & SKUs",
 ])
 
 with tab_geral:
+    df_meta = load_metas()
+    mes_selecionado = data_fim.month
+    ano_selecionado = data_fim.year
+
+    if not df_meta.empty:
+        m_mes = metas_do_mes(df_meta, ano_selecionado, mes_selecionado)
+        m_ano = metas_ano(df_meta, ano_selecionado)
+        m_acu = metas_acumulado(df_meta, ano_selecionado, mes_selecionado)
+
+        def pct_barra(real, meta):
+            if meta <= 0: return 0
+            return min(real / meta * 100, 100)
+
+        def cor_barra(real, meta):
+            if meta <= 0: return "#3b6fff"
+            p = real / meta * 100
+            return "#10b981" if p >= 100 else ("#f59e0b" if p >= 70 else "#f43f5e")
+
+        def card_class(real, meta):
+            if meta <= 0: return ""
+            return "ok" if real >= meta else ("highlight" if real/meta < 0.7 else "")
+
+        def dif_html(dif):
+            cls = "pos" if dif >= 0 else "neg"
+            sinal = "+" if dif >= 0 else ""
+            return f"<span class='meta-card-sub {cls}'>{sinal}{brl(dif)}</span>"
+
+        sh("Painel de Metas — Mês Atual vs Meta")
+
+        top1, top2, top3 = st.columns(3)
+        # ---- TOTAL
+        with top1:
+            pct_total_mes = pct_barra(total_rec, m_mes["meta_total"])
+            cls = card_class(total_rec, m_mes["meta_total"])
+            cor = cor_barra(total_rec, m_mes["meta_total"])
+            dif_mes_total = total_rec - m_mes["meta_total"]
+            st.markdown(f"""
+            <div class="meta-card {cls}">
+              <div class="meta-card-label">🎯 Meta Total — {data_fim.strftime('%b/%Y')}</div>
+              <div class="meta-card-value">{brl(m_mes['meta_total'])}</div>
+              <hr class="meta-sep"/>
+              <div class="meta-card-label">📊 Realizado no Período</div>
+              <div class="meta-card-value" style="font-size:1.1rem;">{brl(total_rec)}</div>
+              <div class="meta-bar-wrap"><div class="meta-bar-fill" style="width:{pct_total_mes:.1f}%;background:{cor};"></div></div>
+              <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                <span class="meta-card-sub neu">{pct_total_mes:.1f}% da meta</span>
+                {dif_html(dif_mes_total)}
+              </div>
+            </div>""", unsafe_allow_html=True)
+        # ---- E-COMMERCE
+        with top2:
+            pct_ec_mes = pct_barra(ec_m["receita"], m_mes["meta_ec"])
+            cls_ec = card_class(ec_m["receita"], m_mes["meta_ec"])
+            cor_ec = cor_barra(ec_m["receita"], m_mes["meta_ec"])
+            dif_ec = ec_m["receita"] - m_mes["meta_ec"]
+            st.markdown(f"""
+            <div class="meta-card {cls_ec}" style="border-color:#3b6fff44;">
+              <div class="meta-card-label" style="color:#3b6fff;">🛒 Meta E-commerce — {data_fim.strftime('%b/%Y')}</div>
+              <div class="meta-card-value">{brl(m_mes['meta_ec'])}</div>
+              <hr class="meta-sep"/>
+              <div class="meta-card-label">📊 Realizado E-commerce</div>
+              <div class="meta-card-value" style="font-size:1.1rem;">{brl(ec_m['receita'])}</div>
+              <div class="meta-bar-wrap"><div class="meta-bar-fill" style="width:{pct_ec_mes:.1f}%;background:{cor_ec};"></div></div>
+              <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                <span class="meta-card-sub neu">{pct_ec_mes:.1f}% da meta</span>
+                {dif_html(dif_ec)}
+              </div>
+            </div>""", unsafe_allow_html=True)
+        # ---- MARKETPLACE
+        with top3:
+            pct_mkt_mes = pct_barra(mp_m["receita"], m_mes["meta_mkt"])
+            cls_mkt = card_class(mp_m["receita"], m_mes["meta_mkt"])
+            cor_mkt = cor_barra(mp_m["receita"], m_mes["meta_mkt"])
+            dif_mkt = mp_m["receita"] - m_mes["meta_mkt"]
+            st.markdown(f"""
+            <div class="meta-card {cls_mkt}" style="border-color:#f59e0b44;">
+              <div class="meta-card-label" style="color:#f59e0b;">🏪 Meta Marketplace — {data_fim.strftime('%b/%Y')}</div>
+              <div class="meta-card-value">{brl(m_mes['meta_mkt'])}</div>
+              <hr class="meta-sep"/>
+              <div class="meta-card-label">📊 Realizado Marketplace</div>
+              <div class="meta-card-value" style="font-size:1.1rem;">{brl(mp_m['receita'])}</div>
+              <div class="meta-bar-wrap"><div class="meta-bar-fill" style="width:{pct_mkt_mes:.1f}%;background:{cor_mkt};"></div></div>
+              <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                <span class="meta-card-sub neu">{pct_mkt_mes:.1f}% da meta</span>
+                {dif_html(dif_mkt)}
+              </div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
     sh("KPIs Consolidados do Período")
-    g1, g2, g3, g4, g5, g6 = st.columns(6)
-    g1.metric("💰 Receita Total",   brl(total_rec),    delta=fv(vp(total_rec, total_rec_ant)))
+    g1, g2, g3, g4, g5 = st.columns(5)
+    g1.metric("💰 Receita Total",   brl(total_rec),       delta=fv(vp(total_rec, total_rec_ant)))
     g2.metric("🛒 Receita E-com",   brl(ec_m["receita"]), delta=fv(vp(ec_m["receita"], ec_ma["receita"])))
     g3.metric("🏪 Receita Mkt",     brl(mp_m["receita"]), delta=fv(vp(mp_m["receita"], mp_ma["receita"])))
-    g4.metric("📑 NFs E-com",       f"{ec_m['total']:,}",  delta=fv(vp(ec_m["total"], ec_ma["total"])))
-    g5.metric("📑 NFs Marketplace", f"{mp_m['total']:,}",  delta=fv(vp(mp_m["total"], mp_ma["total"])))
-    g6.metric("📦 Pedidos Fat. EC", f"{n_fat:,}" if has_ec else "—",
-              delta=fv(vp(n_fat, n_fat_a)) if has_ec else None,
-              help="Pedidos faturados na planilha E-commerce, deduplicados por order ID")
+    g4.metric("📑 NFs E-com",       f"{ec_m['total']:,}", delta=fv(vp(ec_m["total"], ec_ma["total"])))
+    g5.metric("📑 NFs Marketplace", f"{mp_m['total']:,}", delta=fv(vp(mp_m["total"], mp_ma["total"])))
 
     st.markdown("<br>", unsafe_allow_html=True)
     if total_rec > 0:
@@ -571,11 +730,6 @@ with tab_geral:
             f"<div class='info'>📐 <strong>Mix de canal:</strong> E-commerce "
             f"<strong>{pec:.1f}%</strong> (R$ {ec_m['receita']:,.0f}) · "
             f"Marketplace <strong>{pmp:.1f}%</strong> (R$ {mp_m['receita']:,.0f})</div>",
-            unsafe_allow_html=True)
-    if has_ec and n_tot > 0 and n_fat/n_tot*100 < 70:
-        st.markdown(
-            f"<div class='warn'>⚠️ Taxa de faturamento E-commerce: "
-            f"<strong>{n_fat/n_tot*100:.1f}%</strong> — {n_pend} pedido(s) pendente(s)</div>",
             unsafe_allow_html=True)
 
     if not mp_ecom_all.empty:
@@ -677,6 +831,156 @@ with tab_geral:
                                    marker=dict(colors=utm_colors))
             fig_utmp.update_layout(**L(margin=dict(l=5,r=5,t=30,b=5)))
             st.plotly_chart(fig_utmp, use_container_width=True)
+
+
+with tab_metas:
+    df_meta = load_metas()
+    if df_meta.empty:
+        st.markdown(
+            "<div class='warn'>⚠️ Não foi possível carregar a planilha de metas. "
+            "Verifique se o link está acessível publicamente.</div>",
+            unsafe_allow_html=True)
+        st.stop()
+
+    anos_disp = sorted(df_meta["mes_dt"].dt.year.unique().tolist(), reverse=True)
+    col_ano, col_ref = st.columns([1, 3])
+    with col_ano:
+        ano_meta = st.selectbox("Ano", anos_disp, key="meta_ano")
+    with col_ref:
+        st.markdown(
+            "<div style='font-size:.75rem;color:#475569;padding-top:28px;'>"
+            "Dados carregados automaticamente da planilha de metas.</div>",
+            unsafe_allow_html=True)
+
+    m_ano_sel = metas_ano(df_meta, ano_meta)
+    hoje_meta = datetime.today().date()
+    m_acu_sel = metas_acumulado(df_meta, ano_meta, hoje_meta.month)
+
+    def pct_b(r, m): return min(r/m*100, 100) if m > 0 else 0
+    def cor_b(r, m):
+        if m <= 0: return "#3b6fff"
+        p = r/m*100
+        return "#10b981" if p >= 100 else ("#f59e0b" if p >= 70 else "#f43f5e")
+    def dif_h(d):
+        cls = "pos" if d >= 0 else "neg"
+        s   = "+" if d >= 0 else ""
+        return f"<span class='meta-card-sub {cls}'>{s}{brl(d)}</span>"
+    def cls_c(r, m):
+        if m <= 0: return ""
+        return "ok" if r >= m else ("highlight" if r/m < 0.7 else "")
+
+    sh(f"Visão Anual — {ano_meta}")
+
+    ya1, ya2, ya3 = st.columns(3)
+    for col_w, lbl, meta, real, canal_cor in [
+        (ya1, "Total", m_ano_sel["meta_total"], m_ano_sel["real_total"], ""),
+        (ya2, "E-commerce", m_ano_sel["meta_ec"],    m_ano_sel["real_ec"],    "#3b6fff"),
+        (ya3, "Marketplace", m_ano_sel["meta_mkt"],   m_ano_sel["real_mkt"],   "#f59e0b"),
+    ]:
+        pct = pct_b(real, meta)
+        cor = cor_b(real, meta)
+        dif = real - meta
+        with col_w:
+            st.markdown(f"""
+            <div class="meta-card {cls_c(real,meta)}">
+              <div class="meta-card-label" style="{'color:'+canal_cor+';' if canal_cor else ''}">
+                🎯 Meta Anual {lbl}</div>
+              <div class="meta-card-value">{brl(meta)}</div>
+              <hr class="meta-sep"/>
+              <div class="meta-card-label">✅ Realizado no Ano</div>
+              <div class="meta-card-value" style="font-size:1.1rem;">{brl(real)}</div>
+              <div class="meta-bar-wrap">
+                <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{cor};"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                <span class="meta-card-sub neu">{pct:.1f}% da meta</span>
+                {dif_h(dif)}
+              </div>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    sh(f"Acumulado até {hoje_meta.strftime('%B/%Y')} — {ano_meta}")
+
+    aa1, aa2, aa3 = st.columns(3)
+    for col_w, lbl, meta, real, canal_cor in [
+        (aa1, "Total",       m_acu_sel["meta_total"], m_acu_sel["real_total"], ""),
+        (aa2, "E-commerce",  m_acu_sel["meta_ec"],    m_acu_sel["real_ec"],    "#3b6fff"),
+        (aa3, "Marketplace", m_acu_sel["meta_mkt"],   m_acu_sel["real_mkt"],   "#f59e0b"),
+    ]:
+        pct = pct_b(real, meta)
+        cor = cor_b(real, meta)
+        dif = real - meta
+        with col_w:
+            st.markdown(f"""
+            <div class="meta-card {cls_c(real,meta)}">
+              <div class="meta-card-label" style="{'color:'+canal_cor+';' if canal_cor else ''}">
+                📊 Meta Acumulada {lbl}</div>
+              <div class="meta-card-value">{brl(meta)}</div>
+              <hr class="meta-sep"/>
+              <div class="meta-card-label">✅ Realizado Acumulado</div>
+              <div class="meta-card-value" style="font-size:1.1rem;">{brl(real)}</div>
+              <div class="meta-bar-wrap">
+                <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{cor};"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                <span class="meta-card-sub neu">{pct:.1f}% da meta</span>
+                {dif_h(dif)}
+              </div>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    sh("Detalhe Mensal por Canal")
+
+    df_ano = df_meta[df_meta["mes_dt"].dt.year == ano_meta].copy()
+    df_ano["mes_label"] = df_ano["mes_dt"].dt.strftime("%b")
+
+    fig_metas = go.Figure()
+    meses = df_ano["mes_label"].tolist()
+    fig_metas.add_trace(go.Bar(
+        name="Meta Total", x=meses, y=df_ano["META TOTAL"],
+        marker_color="rgba(100,116,139,.3)", marker_line_width=0,
+    ))
+    fig_metas.add_trace(go.Bar(
+        name="Realizado Total", x=meses, y=df_ano["Realizado REAL TOTAL"],
+        marker_color="#10b981", marker_line_width=0, opacity=0.9,
+    ))
+    fig_metas.update_layout(barmode="group", **L(
+        title=f"Meta vs Realizado Total — {ano_meta}"))
+    st.plotly_chart(fig_metas, use_container_width=True)
+
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        fig_ec = go.Figure([
+            go.Bar(name="Meta E-com",  x=meses, y=df_ano["Meta B2C"],
+                   marker_color="rgba(59,111,255,.3)", marker_line_width=0),
+            go.Bar(name="Real E-com",  x=meses, y=df_ano["Realizado B2C"],
+                   marker_color="#3b6fff", opacity=0.9, marker_line_width=0),
+        ])
+        fig_ec.update_layout(barmode="group", **L(title="E-commerce"))
+        st.plotly_chart(fig_ec, use_container_width=True)
+
+    with mc2:
+        fig_mkt = go.Figure([
+            go.Bar(name="Meta MKT",  x=meses, y=df_ano["Meta MKT PLACE"],
+                   marker_color="rgba(245,158,11,.3)", marker_line_width=0),
+            go.Bar(name="Real MKT",  x=meses, y=df_ano["Realizado MKT PLACE"],
+                   marker_color="#f59e0b", opacity=0.9, marker_line_width=0),
+        ])
+        fig_mkt.update_layout(barmode="group", **L(title="Marketplace"))
+        st.plotly_chart(fig_mkt, use_container_width=True)
+
+    sh("Tabela Mensal de Metas")
+    df_tab = df_ano[["Ano/Mês","Meta B2C","Meta MKT PLACE","META TOTAL",
+                     "Realizado B2C","Realizado MKT PLACE","Realizado REAL TOTAL","DIF"]].copy()
+    for col in ["Meta B2C","Meta MKT PLACE","META TOTAL",
+                "Realizado B2C","Realizado MKT PLACE","Realizado REAL TOTAL","DIF"]:
+        df_tab[col] = df_tab[col].apply(brl)
+    df_tab = df_tab.rename(columns={
+        "Ano/Mês":"Mês","Meta B2C":"Meta EC","Meta MKT PLACE":"Meta MKT",
+        "META TOTAL":"Meta Total","Realizado B2C":"Real EC",
+        "Realizado MKT PLACE":"Real MKT","Realizado REAL TOTAL":"Real Total","DIF":"Diferença",
+    })
+    st.dataframe(df_tab, use_container_width=True, hide_index=True)
 
 
 with tab_ec_tab:
