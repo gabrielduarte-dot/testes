@@ -173,8 +173,8 @@ def Li(**kw):
     d = dict(_BL); d["yaxis"] = dict(_BL["yaxis"], autorange="reversed"); d.update(kw); return d
 
 def brl(v):
-    try: return f"R$ {float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
-    except: return "R$ 0,00"
+    try: return f"R$ {float(v):,.0f}".replace(",","X").replace(".",",").replace("X",".")
+    except: return "R$ 0"
 
 def vp(a, b):
     if not b or b == 0: return None
@@ -213,7 +213,7 @@ def load_metas() -> pd.DataFrame:
         r.raise_for_status()
         try:    text = r.content.decode("utf-8")
         except: text = r.content.decode("latin-1")
-        df = pd.read_csv(StringIO(text))
+        df = pd.read_csv(StringIO(text), dtype=str)
         df.columns = [c.strip() for c in df.columns]
         df["mes_dt"] = pd.to_datetime(df["Mês"], dayfirst=True, errors="coerce")
         for col in ["Meta B2C","Meta MKT PLACE","META TOTAL",
@@ -221,7 +221,7 @@ def load_metas() -> pd.DataFrame:
             if col in df.columns:
                 df[col] = df[col].apply(parse_num_br)
         return df.dropna(subset=["mes_dt"])
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 def metas_do_mes(df_meta: pd.DataFrame, ano: int, mes: int) -> dict:
@@ -589,12 +589,12 @@ mp_mkt_all  = agg_nf(df_mp, "marketplace")
 st.markdown("---")
 hoje = datetime.today().date()
 
-if "d_ini" not in st.session_state: st.session_state.d_ini = hoje - timedelta(days=30)
+if "d_ini" not in st.session_state: st.session_state.d_ini = hoje.replace(day=1)
 if "d_fim" not in st.session_state: st.session_state.d_fim = hoje
 
 fr = st.columns([2, 2, 3])
-with fr[0]: data_ini = st.date_input("De",  value=st.session_state.d_ini, key="d_ini")
-with fr[1]: data_fim = st.date_input("Até", value=st.session_state.d_fim, key="d_fim")
+with fr[0]: data_ini = st.date_input("De",  value=st.session_state.d_ini, key="d_ini", format="DD/MM/YYYY")
+with fr[1]: data_fim = st.date_input("Até", value=st.session_state.d_fim, key="d_fim", format="DD/MM/YYYY")
 with fr[2]: comp_modo = st.selectbox("Comparar com",
     ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"], key="comp")
 
@@ -626,13 +626,14 @@ tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod = st.tabs([
 
 with tab_geral:
     df_meta = load_metas()
-    mes_selecionado = data_fim.month
-    ano_selecionado = data_fim.year
+    mes_atual  = hoje.month
+    ano_atual  = hoje.year
 
     if not df_meta.empty:
-        m_mes = metas_do_mes(df_meta, ano_selecionado, mes_selecionado)
-        m_ano = metas_ano(df_meta, ano_selecionado)
-        m_acu = metas_acumulado(df_meta, ano_selecionado, mes_selecionado)
+        m_mes = metas_do_mes(df_meta, ano_atual, mes_atual)
+        m_ano = metas_ano(df_meta, ano_atual)
+        m_acu = metas_acumulado(df_meta, ano_atual, mes_atual)
+        mes_label_atual = date(ano_atual, mes_atual, 1).strftime('%b/%Y')
 
         def pct_barra(real, meta):
             if meta <= 0: return 0
@@ -663,7 +664,7 @@ with tab_geral:
             dif_mes_total = total_rec - m_mes["meta_total"]
             st.markdown(f"""
             <div class="meta-card {cls}">
-              <div class="meta-card-label">🎯 Meta Total — {data_fim.strftime('%b/%Y')}</div>
+              <div class="meta-card-label">🎯 Meta Total — {mes_label_atual}</div>
               <div class="meta-card-value">{brl(m_mes['meta_total'])}</div>
               <hr class="meta-sep"/>
               <div class="meta-card-label">📊 Realizado no Período</div>
@@ -682,7 +683,7 @@ with tab_geral:
             dif_ec = ec_m["receita"] - m_mes["meta_ec"]
             st.markdown(f"""
             <div class="meta-card {cls_ec}" style="border-color:#3b6fff44;">
-              <div class="meta-card-label" style="color:#3b6fff;">🛒 Meta E-commerce — {data_fim.strftime('%b/%Y')}</div>
+              <div class="meta-card-label" style="color:#3b6fff;">🛒 Meta E-commerce — {mes_label_atual}</div>
               <div class="meta-card-value">{brl(m_mes['meta_ec'])}</div>
               <hr class="meta-sep"/>
               <div class="meta-card-label">📊 Realizado E-commerce</div>
@@ -701,7 +702,7 @@ with tab_geral:
             dif_mkt = mp_m["receita"] - m_mes["meta_mkt"]
             st.markdown(f"""
             <div class="meta-card {cls_mkt}" style="border-color:#f59e0b44;">
-              <div class="meta-card-label" style="color:#f59e0b;">🏪 Meta Marketplace — {data_fim.strftime('%b/%Y')}</div>
+              <div class="meta-card-label" style="color:#f59e0b;">🏪 Meta Marketplace — {mes_label_atual}</div>
               <div class="meta-card-value">{brl(m_mes['meta_mkt'])}</div>
               <hr class="meta-sep"/>
               <div class="meta-card-label">📊 Realizado Marketplace</div>
