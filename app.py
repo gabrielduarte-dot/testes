@@ -1041,7 +1041,9 @@ with tab_ec_tab:
 
     if has_ec:
         sh("Status dos Pedidos (Planilha E-commerce)")
-        if not ec_p_ec.empty:
+        if ec_p_ec.empty:
+            st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado para o período selecionado na planilha E-commerce.</div>", unsafe_allow_html=True)
+        else:
             ec_dedup = ec_p_ec.drop_duplicates("order")
             n_fat_ec  = int(ec_dedup["faturado"].sum())
             n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
@@ -1070,9 +1072,13 @@ with tab_ec_tab:
                     st.dataframe(
                         utm_t.rename(columns={"utmsource":"UTM Source","pedidos":"Pedidos Fat.","pct":"Share"}),
                         use_container_width=True, hide_index=True)
+                else:
+                    st.markdown("<div class='warn'>⚠️ Nenhum pedido faturado no período.</div>", unsafe_allow_html=True)
 
         sh("Detalhamento de Pedidos")
-        if not ec_p_ec.empty:
+        if ec_p_ec.empty:
+            st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado para o período selecionado.</div>", unsafe_allow_html=True)
+        else:
             det = (ec_p_ec.drop_duplicates("order")
                    [["order","data","status","utmsource","quantity_sku"]]
                    .rename(columns={"order":"Order ID","data":"Data","status":"Status",
@@ -1082,9 +1088,21 @@ with tab_ec_tab:
             st.download_button("📥 Exportar pedidos",
                                data=det.to_csv(index=False).encode("utf-8"),
                                file_name="pedidos_ecommerce.csv", mime="text/csv")
+    else:
+        sh("Status dos Pedidos (Planilha E-commerce)")
+        st.markdown(
+            "<div class='info'>ℹ️ Carregue a <strong>planilha E-commerce</strong> no painel "
+            "⚙️ Fontes de Dados para visualizar status de pedidos, UTM Source e detalhamento.</div>",
+            unsafe_allow_html=True)
 
     sh("Notas Fiscais E-commerce")
-    if not ec_p.empty:
+    if ec_p.empty:
+        st.markdown(
+            "<div class='warn'>⚠️ Nenhuma nota fiscal de E-commerce no período selecionado. "
+            "Verifique se os canais <code>Site Mondaine / Site Seculus / Site Timex / Multimarcas</code> "
+            "estão presentes na planilha de faturamento.</div>",
+            unsafe_allow_html=True)
+    else:
         nf = ec_p[["nota","data","MARKETPLACE","marca","receita","itens"]].copy()
         nf["receita"] = nf["receita"].map(brl)
         nf["itens"]   = nf["itens"].round().astype(int)
