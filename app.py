@@ -42,42 +42,11 @@ st.markdown("""
   --zone-bg:  linear-gradient(135deg,#0f1421,#111827);
   --tab-b:    #1a2540;
   --rc-row-b: #1a2540;
-  --seg-empty:#1e2d4a;
   --ptable-h: rgba(59,111,255,.04);
   --ptable-th:#1e2d4a;
   --ptable-tr:#111827;
 }
 
-/* ── LIGHT THEME ── */
-body.light-mode, body.light-mode [class*="css"]{color:#1e293b!important;}
-body.light-mode{
-  --bg:       #f0f4f8;
-  --bg2:      #ffffff;
-  --bg3:      #f8fafc;
-  --border:   #cbd5e1;
-  --border2:  #e2e8f0;
-  --text:     #1e293b;
-  --text2:    #475569;
-  --text3:    #64748b;
-  --text4:    #94a3b8;
-  --topbar:   linear-gradient(90deg,#1e293b,#334155);
-  --topbar-b: #475569;
-  --card:     linear-gradient(135deg,#ffffff,#f8fafc);
-  --card-h:   rgba(59,111,255,.04);
-  --info-bg:  linear-gradient(135deg,#eff6ff,#dbeafe);
-  --info-b:   #93c5fd;
-  --info-t:   #1d4ed8;
-  --warn-bg:  linear-gradient(135deg,#fffbeb,#fef3c7);
-  --warn-b:   #fbbf24;
-  --warn-t:   #92400e;
-  --zone-bg:  linear-gradient(135deg,#f1f5f9,#e2e8f0);
-  --tab-b:    #cbd5e1;
-  --rc-row-b: #e2e8f0;
-  --seg-empty:#e2e8f0;
-  --ptable-h: rgba(59,111,255,.04);
-  --ptable-th:#e2e8f0;
-  --ptable-tr:#f8fafc;
-}
 
 html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
 .stApp{background-color:var(--bg)!important;color:var(--text)!important;}
@@ -104,8 +73,6 @@ hr{border-color:var(--border2)!important;}
 .dot{width:7px;height:7px;border-radius:50%;background:#10b981;display:inline-block;animation:blink 2s infinite;}
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.35;}}
 
-.theme-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:4px 12px;font-size:.75rem;cursor:pointer;color:#f1f5f9;transition:all .2s;font-family:'DM Sans',sans-serif;}
-.theme-btn:hover{background:rgba(255,255,255,.2);}
 
 .sh{display:flex;align-items:center;gap:10px;margin:22px 0 12px;}
 .sh h4{margin:0!important;font-size:.78rem!important;font-weight:700!important;color:var(--text4)!important;text-transform:uppercase;letter-spacing:.1em;}
@@ -144,10 +111,8 @@ hr{border-color:var(--border2)!important;}
 .mc.ok  .mc-value{color:#10b981;}
 .mc.bad .mc-value{color:#f43f5e;}
 
-/* ── SEGMENTED PROGRESS BAR ── */
-.seg-bar{display:flex;gap:3px;margin-top:12px;height:6px;}
-.seg-bar .seg{flex:1;border-radius:2px;background:var(--seg-empty);transition:background .3s;}
-.seg-bar .seg.filled{background:var(--seg-color,#10b981);}
+.meta-bar-wrap{margin-top:10px;height:5px;border-radius:3px;background:#1e2d4a;overflow:hidden;}
+.meta-bar-fill{height:100%;border-radius:3px;transition:width .4s;}
 .mc-progress-row{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
 .mc-pct{font-size:.7rem;font-family:'DM Mono',monospace;color:var(--text3);}
 
@@ -366,7 +331,7 @@ def metas_ano(df_meta: pd.DataFrame, ano: int) -> dict:
     }
 
 for k, v in [("df_mp_raw", None),("df_ec_raw", None),
-             ("ts_mp", None),("ts_ec", None),("tema", "dark")]:
+             ("ts_mp", None),("ts_ec", None)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -558,38 +523,6 @@ has_ec = st.session_state.df_ec_raw is not None
 ts_mp  = st.session_state.ts_mp or "—"
 ts_ec  = st.session_state.ts_ec or "—"
 
-tema = st.session_state.tema
-tema_icon  = "☀️" if tema == "dark" else "🌙"
-tema_label = "Modo Claro" if tema == "dark" else "Modo Escuro"
-body_class = "" if tema == "dark" else "light-mode"
-
-st.markdown(f"""
-<script>
-  document.body.className = "{body_class}";
-</script>
-<style>
-  .stApp {{ background-color: {"#080c14" if tema=="dark" else "#f0f4f8"} !important; }}
-  body {{ background-color: {"#080c14" if tema=="dark" else "#f0f4f8"} !important; }}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown(f"""
-<div class="topbar">
-  <div class="topbar-brand">⌚ <span>Seculus</span> · Sales Intelligence</div>
-  <div class="topbar-right">
-    <span class="dot"></span>
-    <span>NF: {ts_mp}</span>
-    <span style="color:#475569">|</span>
-    <span>E-com: {ts_ec}</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-tema_col, _ = st.columns([1, 8])
-with tema_col:
-    if st.button(f"{tema_icon} {tema_label}", key="btn_tema"):
-        st.session_state.tema = "light" if tema == "dark" else "dark"
-        st.rerun()
 
 with st.expander("⚙️  Fontes de Dados", expanded=not has_mp):
     c1, c2, c3 = st.columns([2, 2, 1])
@@ -766,24 +699,17 @@ with tab_geral:
             p = real / meta * 100
             return "ok" if p >= 100 else ("warn2" if p >= 70 else "bad")
 
-        def seg_bar_html(pct, cor, n_segs=20):
-            filled = round(pct / 100 * n_segs)
-            segs = "".join(
-                f"<div class='seg filled' style='--seg-color:{cor};'></div>"
-                if i < filled else "<div class='seg'></div>"
-                for i in range(n_segs)
-            )
-            return f"<div class='seg-bar'>{segs}</div>"
-
         def compact_card(icon, label, meta_val, real_val, periodo, canal_cor=""):
-            pct   = pct_barra(real_val, meta_val)
-            cor   = cor_seg(real_val, meta_val)
-            cls   = mc_class(real_val, meta_val)
-            dif   = real_val - meta_val
-            sinal = "+" if dif >= 0 else ""
+            pct     = pct_barra(real_val, meta_val)
+            cor     = cor_seg(real_val, meta_val)
+            cls     = mc_class(real_val, meta_val)
+            dif     = real_val - meta_val
+            sinal   = "+" if dif >= 0 else ""
             dif_cls = "pos" if dif >= 0 else "neg"
-            cor_style = f"style='color:{canal_cor};'" if canal_cor else ""
-            bar = seg_bar_html(pct, cor)
+            cor_style = f"style=\'color:{canal_cor};'" if canal_cor else ""
+            bar = (f"<div class=\'meta-bar-wrap\'>"
+                   f"<div class=\'meta-bar-fill\' style=\'width:{pct:.1f}%;background:{cor};\' ></div>"
+                   f"</div>")
             return f"""
             <div class="mc {cls}">
               <div class="mc-icon" {cor_style}>{icon}</div>
@@ -966,12 +892,6 @@ with tab_metas:
         if m <= 0: return ""
         p = r/m*100
         return "ok" if p >= 100 else ("warn2" if p >= 70 else "bad")
-    def seg_bar_m(pct, cor, n=20):
-        filled = round(pct/100*n)
-        return "<div class='seg-bar'>" + "".join(
-            f"<div class='seg filled' style='--seg-color:{cor};'></div>" if i < filled
-            else "<div class='seg'></div>" for i in range(n)
-        ) + "</div>"
     def mc_card(icon, lbl, meta, real, canal_cor=""):
         pct = pct_b(real, meta)
         cor = cor_b(real, meta)
@@ -980,6 +900,9 @@ with tab_metas:
         s = "+" if dif >= 0 else ""
         dc = "pos" if dif >= 0 else "neg"
         cs = f"style='color:{canal_cor};'" if canal_cor else ""
+        bar = (f"<div class='meta-bar-wrap'>"
+               f"<div class='meta-bar-fill' style='width:{pct:.1f}%;background:{cor};'></div>"
+               f"</div>")
         return f"""<div class="mc {cls}">
           <div class="mc-icon" {cs}>{icon}</div>
           <div class="mc-label" {cs}>{lbl}</div>
@@ -989,7 +912,7 @@ with tab_metas:
             <span class="dot-sep">·</span>
             <span class="neu">{pct:.0f}% da meta</span>
           </div>
-          {seg_bar_m(pct, cor)}
+          {bar}
           <div class="mc-progress-row">
             <span class="mc-pct">Meta: {brl(meta)}</span>
           </div>
