@@ -17,77 +17,172 @@ st.set_page_config(
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap');
+
+/* ── DARK THEME (default) ── */
+:root{
+  --bg:       #080c14;
+  --bg2:      #111827;
+  --bg3:      #131e35;
+  --border:   #1e2d4a;
+  --border2:  #1a2540;
+  --text:     #e2e8f0;
+  --text2:    #94a3b8;
+  --text3:    #64748b;
+  --text4:    #475569;
+  --topbar:   linear-gradient(90deg,#0d1321,#111827);
+  --topbar-b: #1a2540;
+  --card:     linear-gradient(135deg,#111827,#131e35);
+  --card-h:   rgba(59,111,255,.05);
+  --info-bg:  linear-gradient(135deg,#0f1c35,#111e38);
+  --info-b:   #1e3a5f;
+  --info-t:   #93c5fd;
+  --warn-bg:  linear-gradient(135deg,#1a1505,#1f1a06);
+  --warn-b:   #3d2e00;
+  --warn-t:   #fde68a;
+  --zone-bg:  linear-gradient(135deg,#0f1421,#111827);
+  --tab-b:    #1a2540;
+  --rc-row-b: #1a2540;
+  --seg-empty:#1e2d4a;
+  --ptable-h: rgba(59,111,255,.04);
+  --ptable-th:#1e2d4a;
+  --ptable-tr:#111827;
+}
+
+/* ── LIGHT THEME ── */
+body.light-mode, body.light-mode [class*="css"]{color:#1e293b!important;}
+body.light-mode{
+  --bg:       #f0f4f8;
+  --bg2:      #ffffff;
+  --bg3:      #f8fafc;
+  --border:   #cbd5e1;
+  --border2:  #e2e8f0;
+  --text:     #1e293b;
+  --text2:    #475569;
+  --text3:    #64748b;
+  --text4:    #94a3b8;
+  --topbar:   linear-gradient(90deg,#1e293b,#334155);
+  --topbar-b: #475569;
+  --card:     linear-gradient(135deg,#ffffff,#f8fafc);
+  --card-h:   rgba(59,111,255,.04);
+  --info-bg:  linear-gradient(135deg,#eff6ff,#dbeafe);
+  --info-b:   #93c5fd;
+  --info-t:   #1d4ed8;
+  --warn-bg:  linear-gradient(135deg,#fffbeb,#fef3c7);
+  --warn-b:   #fbbf24;
+  --warn-t:   #92400e;
+  --zone-bg:  linear-gradient(135deg,#f1f5f9,#e2e8f0);
+  --tab-b:    #cbd5e1;
+  --rc-row-b: #e2e8f0;
+  --seg-empty:#e2e8f0;
+  --ptable-h: rgba(59,111,255,.04);
+  --ptable-th:#e2e8f0;
+  --ptable-tr:#f8fafc;
+}
+
 html,body,[class*="css"]{font-family:'DM Sans',sans-serif;}
-.stApp{background-color:#080c14;color:#e2e8f0;}
+.stApp{background-color:var(--bg)!important;color:var(--text)!important;}
 [data-testid="stSidebar"]{display:none;}
-[data-testid="stMetric"]{background:linear-gradient(135deg,#111827 0%,#131e35 100%);border:1px solid #1e2d4a;border-radius:14px;padding:20px 24px;transition:all .25s;}
+
+[data-testid="stMetric"]{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 24px;transition:all .25s;}
 [data-testid="stMetric"]:hover{border-color:#3b6fff;box-shadow:0 0 24px rgba(59,111,255,.14);}
-[data-testid="stMetricLabel"]{color:#64748b!important;font-size:.72rem!important;font-weight:600!important;text-transform:uppercase;letter-spacing:.1em;}
-[data-testid="stMetricValue"]{color:#f1f5f9!important;font-size:1.5rem!important;font-weight:700!important;font-family:'DM Mono',monospace!important;}
+[data-testid="stMetricLabel"]{color:var(--text3)!important;font-size:.72rem!important;font-weight:600!important;text-transform:uppercase;letter-spacing:.1em;}
+[data-testid="stMetricValue"]{color:var(--text)!important;font-size:1.5rem!important;font-weight:700!important;font-family:'DM Mono',monospace!important;}
 [data-testid="stMetricDelta"]{font-size:.8rem!important;}
-h1,h2,h3,h4{color:#f1f5f9!important;}
-hr{border-color:#1a2540!important;}
-.stTabs [data-baseweb="tab-list"]{background:transparent!important;border-bottom:1px solid #1a2540!important;gap:0;padding:0;}
-.stTabs [data-baseweb="tab"]{color:#64748b!important;font-weight:500!important;font-size:.88rem!important;padding:10px 22px!important;border-radius:0!important;border-bottom:2px solid transparent!important;}
-.stTabs [aria-selected="true"]{color:#e2e8f0!important;border-bottom:2px solid #3b6fff!important;background:transparent!important;}
-.stTabs [data-baseweb="tab"]:hover{color:#94a3b8!important;background:rgba(59,111,255,.05)!important;}
-.stDataFrame{border:1px solid #1e2d4a!important;border-radius:12px!important;}
-.topbar{background:linear-gradient(90deg,#0d1321,#111827);border-bottom:1px solid #1a2540;padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:58px;margin:-1rem -1rem 1.5rem -1rem;position:sticky;top:0;z-index:999;}
+h1,h2,h3,h4{color:var(--text)!important;}
+hr{border-color:var(--border2)!important;}
+
+.stTabs [data-baseweb="tab-list"]{background:transparent!important;border-bottom:1px solid var(--tab-b)!important;gap:0;padding:0;}
+.stTabs [data-baseweb="tab"]{color:var(--text3)!important;font-weight:500!important;font-size:.88rem!important;padding:10px 22px!important;border-radius:0!important;border-bottom:2px solid transparent!important;}
+.stTabs [aria-selected="true"]{color:var(--text)!important;border-bottom:2px solid #3b6fff!important;background:transparent!important;}
+.stTabs [data-baseweb="tab"]:hover{color:var(--text2)!important;background:var(--card-h)!important;}
+.stDataFrame{border:1px solid var(--border)!important;border-radius:12px!important;}
+
+.topbar{background:var(--topbar);border-bottom:1px solid var(--topbar-b);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:58px;margin:-1rem -1rem 1.5rem -1rem;position:sticky;top:0;z-index:999;}
 .topbar-brand{display:flex;align-items:center;gap:10px;font-size:1rem;font-weight:700;color:#f1f5f9;letter-spacing:-.02em;}
 .topbar-brand span{color:#3b6fff;}
-.topbar-right{display:flex;align-items:center;gap:14px;font-size:.73rem;color:#475569;font-family:'DM Mono',monospace;}
+.topbar-right{display:flex;align-items:center;gap:14px;font-size:.73rem;color:#94a3b8;font-family:'DM Mono',monospace;}
 .dot{width:7px;height:7px;border-radius:50%;background:#10b981;display:inline-block;animation:blink 2s infinite;}
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+.theme-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:4px 12px;font-size:.75rem;cursor:pointer;color:#f1f5f9;transition:all .2s;font-family:'DM Sans',sans-serif;}
+.theme-btn:hover{background:rgba(255,255,255,.2);}
+
 .sh{display:flex;align-items:center;gap:10px;margin:22px 0 12px;}
-.sh h4{margin:0!important;font-size:.78rem!important;font-weight:700!important;color:#475569!important;text-transform:uppercase;letter-spacing:.1em;}
-.sh .ln{flex:1;height:1px;background:linear-gradient(90deg,#1e2d4a,transparent);}
-.info{background:linear-gradient(135deg,#0f1c35,#111e38);border:1px solid #1e3a5f;border-left:3px solid #3b6fff;border-radius:0 12px 12px 0;padding:12px 16px;margin:8px 0;font-size:.85rem;color:#93c5fd;line-height:1.6;}
-.warn{background:linear-gradient(135deg,#1a1505,#1f1a06);border:1px solid #3d2e00;border-left:3px solid #f59e0b;border-radius:0 12px 12px 0;padding:12px 16px;margin:8px 0;font-size:.85rem;color:#fde68a;line-height:1.6;}
-.zone{background:linear-gradient(135deg,#0f1421,#111827);border:1px dashed #2a3a5a;border-radius:16px;padding:40px;text-align:center;}
-.zone h3{color:#f1f5f9!important;margin-bottom:8px!important;}
-.zone p{color:#64748b;font-size:.88rem;}
-.rc{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:14px;padding:20px 22px;}
+.sh h4{margin:0!important;font-size:.78rem!important;font-weight:700!important;color:var(--text4)!important;text-transform:uppercase;letter-spacing:.1em;}
+.sh .ln{flex:1;height:1px;background:linear-gradient(90deg,var(--border2),transparent);}
+
+.info{background:var(--info-bg);border:1px solid var(--info-b);border-left:3px solid #3b6fff;border-radius:0 12px 12px 0;padding:12px 16px;margin:8px 0;font-size:.85rem;color:var(--info-t);line-height:1.6;}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-b);border-left:3px solid #f59e0b;border-radius:0 12px 12px 0;padding:12px 16px;margin:8px 0;font-size:.85rem;color:var(--warn-t);line-height:1.6;}
+.zone{background:var(--zone-bg);border:1px dashed var(--border);border-radius:16px;padding:40px;text-align:center;}
+.zone h3{color:var(--text)!important;margin-bottom:8px!important;}
+.zone p{color:var(--text3);font-size:.88rem;}
+
+.rc{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;}
 .rc-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin:0 0 14px 0;}
-.rc-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1a2540;font-size:.83rem;color:#94a3b8;}
+.rc-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--rc-row-b);font-size:.83rem;color:var(--text2);}
 .rc-row:last-child{border-bottom:none;}
-.rc-val{font-family:'DM Mono',monospace;color:#f1f5f9;font-weight:600;font-size:.88rem;}
+.rc-val{font-family:'DM Mono',monospace;color:var(--text);font-weight:600;font-size:.88rem;}
 .rc-badge{padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:700;font-family:'DM Mono',monospace;}
 .rc-green{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.25);}
 .rc-red{background:rgba(244,63,94,.15);color:#fb7185;border:1px solid rgba(244,63,94,.25);}
 .rc-amber{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.25);}
-.meta-panel{background:linear-gradient(135deg,#0d1321,#111827);border:1px solid #1e2d4a;border-radius:16px;padding:22px 26px;margin-bottom:16px;}
-.meta-panel-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#475569;margin:0 0 16px 0;}
-.meta-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
-.meta-card{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:12px;padding:16px 18px;transition:border-color .2s;}
-.meta-card:hover{border-color:#3b6fff;}
-.meta-card-label{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:#64748b;margin-bottom:6px;}
-.meta-card-value{font-size:1.35rem;font-weight:700;font-family:'DM Mono',monospace;color:#f1f5f9;line-height:1.1;margin-bottom:4px;}
-.meta-card-sub{font-size:.75rem;font-family:'DM Mono',monospace;font-weight:600;}
-.meta-card-sub.pos{color:#10b981;}
-.meta-card-sub.neg{color:#f43f5e;}
-.meta-card-sub.neu{color:#64748b;}
-.meta-card.highlight{border-color:#f43f5e;background:linear-gradient(135deg,#1a0a12,#1f0d18);}
-.meta-card.highlight .meta-card-value{color:#f43f5e;}
-.meta-card.ok{border-color:#10b981;background:linear-gradient(135deg,#0a1a14,#0d1f18);}
-.meta-card.ok .meta-card-value{color:#10b981;}
-.meta-bar-wrap{margin-top:10px;height:5px;border-radius:3px;background:#1e2d4a;overflow:hidden;}
-.meta-bar-fill{height:100%;border-radius:3px;transition:width .4s;}
-.meta-sep{border:none;border-top:1px solid #1a2540;margin:16px 0;}
+
+/* ── COMPACT META CARDS ── */
+.mc{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;transition:border-color .2s;}
+.mc:hover{border-color:#3b6fff;}
+.mc-icon{font-size:.9rem;margin-bottom:2px;color:var(--text3);}
+.mc-label{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);margin-bottom:2px;}
+.mc-value{font-size:1.6rem;font-weight:700;font-family:'DM Mono',monospace;color:var(--text);line-height:1.15;}
+.mc-sub{display:flex;align-items:center;gap:8px;margin-top:3px;font-size:.75rem;font-family:'DM Mono',monospace;font-weight:600;color:var(--text3);}
+.mc-sub .pos{color:#10b981;}
+.mc-sub .neg{color:#f43f5e;}
+.mc-sub .neu{color:var(--text3);}
+.mc-sub .dot-sep{color:var(--text3);}
+.mc.ok{border-color:#10b981;}
+.mc.warn2{border-color:#f59e0b;}
+.mc.bad{border-color:#f43f5e;}
+.mc.ok  .mc-value{color:#10b981;}
+.mc.bad .mc-value{color:#f43f5e;}
+
+/* ── SEGMENTED PROGRESS BAR ── */
+.seg-bar{display:flex;gap:3px;margin-top:12px;height:6px;}
+.seg-bar .seg{flex:1;border-radius:2px;background:var(--seg-empty);transition:background .3s;}
+.seg-bar .seg.filled{background:var(--seg-color,#10b981);}
+.mc-progress-row{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
+.mc-pct{font-size:.7rem;font-family:'DM Mono',monospace;color:var(--text3);}
+
+/* ── META SEPARATOR ── */
+.meta-sep{border:none;border-top:1px solid var(--border2);margin:12px 0;}
+
+/* ── PRODUCT TABLE ── */
+.ptable{width:100%;border-collapse:collapse;font-family:'DM Sans',sans-serif;}
+.ptable th{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text4);padding:8px 14px;border-bottom:2px solid var(--ptable-th);text-align:left;}
+.ptable th.num{text-align:right;}
+.ptable td{padding:10px 14px;border-bottom:1px solid var(--ptable-tr);vertical-align:middle;}
+.ptable tr:hover td{background:var(--ptable-h);}
+.ptable td.num{text-align:right;font-family:'DM Mono',monospace;color:var(--text);font-size:.88rem;font-weight:600;}
+.ptable td.ref{font-family:'DM Mono',monospace;font-size:.78rem;color:var(--text2);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ptable td.marca-cell{font-size:.78rem;font-weight:700;}
+.ptable .foto-cell{width:62px;padding:5px 10px;}
+.no-img{width:52px;height:52px;border-radius:6px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:1.3rem;}
+.ptable .total-row td{border-top:2px solid var(--ptable-th);font-weight:700;color:var(--text);background:var(--ptable-h);}
+
+/* ── PRODUCT GRID CARDS ── */
 .prod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:12px;}
-.prod-card{background:linear-gradient(135deg,#111827,#131e35);border:1px solid #1e2d4a;border-radius:14px;overflow:hidden;transition:all .25s;display:flex;flex-direction:column;}
+.prod-card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:all .25s;display:flex;flex-direction:column;}
 .prod-card:hover{border-color:#3b6fff;box-shadow:0 0 20px rgba(59,111,255,.12);transform:translateY(-2px);}
-.prod-img-wrap{background:#0d1321;height:160px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-bottom:1px solid #1a2540;}
+.prod-img-wrap{background:var(--bg);height:160px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-bottom:1px solid var(--border2);}
 .prod-img-wrap img{max-height:150px;max-width:100%;object-fit:contain;transition:transform .3s;}
 .prod-card:hover .prod-img-wrap img{transform:scale(1.06);}
-.prod-img-placeholder{width:60px;height:60px;border-radius:50%;background:#1e2d4a;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#3b6fff;}
+.prod-img-placeholder{width:60px;height:60px;border-radius:50%;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#3b6fff;}
 .prod-info{padding:14px 16px;flex:1;display:flex;flex-direction:column;gap:4px;}
 .prod-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.7rem;font-weight:700;font-family:'DM Mono',monospace;margin-bottom:4px;}
-.prod-name{font-size:.82rem;font-weight:600;color:#e2e8f0;line-height:1.4;margin-bottom:6px;}
-.prod-sku{font-size:.7rem;color:#475569;font-family:'DM Mono',monospace;}
-.prod-stats{display:flex;gap:12px;margin-top:auto;padding-top:10px;border-top:1px solid #1a2540;}
+.prod-name{font-size:.82rem;font-weight:600;color:var(--text);line-height:1.4;margin-bottom:6px;}
+.prod-sku{font-size:.7rem;color:var(--text4);font-family:'DM Mono',monospace;}
+.prod-stats{display:flex;gap:12px;margin-top:auto;padding-top:10px;border-top:1px solid var(--border2);}
 .prod-stat{display:flex;flex-direction:column;gap:2px;}
-.prod-stat-label{font-size:.65rem;color:#475569;text-transform:uppercase;letter-spacing:.08em;font-weight:600;}
-.prod-stat-val{font-size:.85rem;font-weight:700;color:#f1f5f9;font-family:'DM Mono',monospace;}
+.prod-stat-label{font-size:.65rem;color:var(--text4);text-transform:uppercase;letter-spacing:.08em;font-weight:600;}
+.prod-stat-val{font-size:.85rem;font-weight:700;color:var(--text);font-family:'DM Mono',monospace;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -270,7 +365,8 @@ def metas_ano(df_meta: pd.DataFrame, ano: int) -> dict:
         "dif":        float(rows["DIF"].sum()),
     }
 
-for k, v in [("df_mp_raw", None),("df_ec_raw", None),("ts_mp", None),("ts_ec", None)]:
+for k, v in [("df_mp_raw", None),("df_ec_raw", None),
+             ("ts_mp", None),("ts_ec", None),("tema", "dark")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -462,17 +558,38 @@ has_ec = st.session_state.df_ec_raw is not None
 ts_mp  = st.session_state.ts_mp or "—"
 ts_ec  = st.session_state.ts_ec or "—"
 
+tema = st.session_state.tema
+tema_icon  = "☀️" if tema == "dark" else "🌙"
+tema_label = "Modo Claro" if tema == "dark" else "Modo Escuro"
+body_class = "" if tema == "dark" else "light-mode"
+
+st.markdown(f"""
+<script>
+  document.body.className = "{body_class}";
+</script>
+<style>
+  .stApp {{ background-color: {"#080c14" if tema=="dark" else "#f0f4f8"} !important; }}
+  body {{ background-color: {"#080c14" if tema=="dark" else "#f0f4f8"} !important; }}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown(f"""
 <div class="topbar">
   <div class="topbar-brand">⌚ <span>Seculus</span> · Sales Intelligence</div>
   <div class="topbar-right">
     <span class="dot"></span>
     <span>NF: {ts_mp}</span>
-    <span style="color:#1a2540">|</span>
+    <span style="color:#475569">|</span>
     <span>E-com: {ts_ec}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+tema_col, _ = st.columns([1, 8])
+with tema_col:
+    if st.button(f"{tema_icon} {tema_label}", key="btn_tema"):
+        st.session_state.tema = "light" if tema == "dark" else "dark"
+        st.rerun()
 
 with st.expander("⚙️  Fontes de Dados", expanded=not has_mp):
     c1, c2, c3 = st.columns([2, 2, 1])
@@ -639,80 +756,63 @@ with tab_geral:
             if meta <= 0: return 0
             return min(real / meta * 100, 100)
 
-        def cor_barra(real, meta):
+        def cor_seg(real, meta):
             if meta <= 0: return "#3b6fff"
             p = real / meta * 100
             return "#10b981" if p >= 100 else ("#f59e0b" if p >= 70 else "#f43f5e")
 
-        def card_class(real, meta):
+        def mc_class(real, meta):
             if meta <= 0: return ""
-            return "ok" if real >= meta else ("highlight" if real/meta < 0.7 else "")
+            p = real / meta * 100
+            return "ok" if p >= 100 else ("warn2" if p >= 70 else "bad")
 
-        def dif_html(dif):
-            cls = "pos" if dif >= 0 else "neg"
+        def seg_bar_html(pct, cor, n_segs=20):
+            filled = round(pct / 100 * n_segs)
+            segs = "".join(
+                f"<div class='seg filled' style='--seg-color:{cor};'></div>"
+                if i < filled else "<div class='seg'></div>"
+                for i in range(n_segs)
+            )
+            return f"<div class='seg-bar'>{segs}</div>"
+
+        def compact_card(icon, label, meta_val, real_val, periodo, canal_cor=""):
+            pct   = pct_barra(real_val, meta_val)
+            cor   = cor_seg(real_val, meta_val)
+            cls   = mc_class(real_val, meta_val)
+            dif   = real_val - meta_val
             sinal = "+" if dif >= 0 else ""
-            return f"<span class='meta-card-sub {cls}'>{sinal}{brl(dif)}</span>"
+            dif_cls = "pos" if dif >= 0 else "neg"
+            cor_style = f"style='color:{canal_cor};'" if canal_cor else ""
+            bar = seg_bar_html(pct, cor)
+            return f"""
+            <div class="mc {cls}">
+              <div class="mc-icon" {cor_style}>{icon}</div>
+              <div class="mc-label" {cor_style}>{label}</div>
+              <div class="mc-value">{brl(real_val)}</div>
+              <div class="mc-sub">
+                <span class="{dif_cls}">{sinal}{brl(dif)}</span>
+                <span class="dot-sep">·</span>
+                <span class="neu">{periodo}</span>
+              </div>
+              {bar}
+              <div class="mc-progress-row">
+                <span class="mc-pct">{pct:.0f}% da meta</span>
+                <span class="mc-pct">Meta: {brl(meta_val)}</span>
+              </div>
+            </div>"""
 
         sh("Painel de Metas — Mês Atual vs Meta")
 
         top1, top2, top3 = st.columns(3)
-        # ---- TOTAL
         with top1:
-            pct_total_mes = pct_barra(total_rec, m_mes["meta_total"])
-            cls = card_class(total_rec, m_mes["meta_total"])
-            cor = cor_barra(total_rec, m_mes["meta_total"])
-            dif_mes_total = total_rec - m_mes["meta_total"]
-            st.markdown(f"""
-            <div class="meta-card {cls}">
-              <div class="meta-card-label">🎯 Meta Total — {mes_label_atual}</div>
-              <div class="meta-card-value">{brl(m_mes['meta_total'])}</div>
-              <hr class="meta-sep"/>
-              <div class="meta-card-label">📊 Realizado no Período</div>
-              <div class="meta-card-value" style="font-size:1.1rem;">{brl(total_rec)}</div>
-              <div class="meta-bar-wrap"><div class="meta-bar-fill" style="width:{pct_total_mes:.1f}%;background:{cor};"></div></div>
-              <div style="display:flex;justify-content:space-between;margin-top:6px;">
-                <span class="meta-card-sub neu">{pct_total_mes:.1f}% da meta</span>
-                {dif_html(dif_mes_total)}
-              </div>
-            </div>""", unsafe_allow_html=True)
-        # ---- E-COMMERCE
+            st.markdown(compact_card("🎯", f"Total — {mes_label_atual}",
+                m_mes["meta_total"], total_rec, mes_label_atual), unsafe_allow_html=True)
         with top2:
-            pct_ec_mes = pct_barra(ec_m["receita"], m_mes["meta_ec"])
-            cls_ec = card_class(ec_m["receita"], m_mes["meta_ec"])
-            cor_ec = cor_barra(ec_m["receita"], m_mes["meta_ec"])
-            dif_ec = ec_m["receita"] - m_mes["meta_ec"]
-            st.markdown(f"""
-            <div class="meta-card {cls_ec}" style="border-color:#3b6fff44;">
-              <div class="meta-card-label" style="color:#3b6fff;">🛒 Meta E-commerce — {mes_label_atual}</div>
-              <div class="meta-card-value">{brl(m_mes['meta_ec'])}</div>
-              <hr class="meta-sep"/>
-              <div class="meta-card-label">📊 Realizado E-commerce</div>
-              <div class="meta-card-value" style="font-size:1.1rem;">{brl(ec_m['receita'])}</div>
-              <div class="meta-bar-wrap"><div class="meta-bar-fill" style="width:{pct_ec_mes:.1f}%;background:{cor_ec};"></div></div>
-              <div style="display:flex;justify-content:space-between;margin-top:6px;">
-                <span class="meta-card-sub neu">{pct_ec_mes:.1f}% da meta</span>
-                {dif_html(dif_ec)}
-              </div>
-            </div>""", unsafe_allow_html=True)
-        # ---- MARKETPLACE
+            st.markdown(compact_card("🛒", f"E-commerce — {mes_label_atual}",
+                m_mes["meta_ec"], ec_m["receita"], mes_label_atual, "#3b6fff"), unsafe_allow_html=True)
         with top3:
-            pct_mkt_mes = pct_barra(mp_m["receita"], m_mes["meta_mkt"])
-            cls_mkt = card_class(mp_m["receita"], m_mes["meta_mkt"])
-            cor_mkt = cor_barra(mp_m["receita"], m_mes["meta_mkt"])
-            dif_mkt = mp_m["receita"] - m_mes["meta_mkt"]
-            st.markdown(f"""
-            <div class="meta-card {cls_mkt}" style="border-color:#f59e0b44;">
-              <div class="meta-card-label" style="color:#f59e0b;">🏪 Meta Marketplace — {mes_label_atual}</div>
-              <div class="meta-card-value">{brl(m_mes['meta_mkt'])}</div>
-              <hr class="meta-sep"/>
-              <div class="meta-card-label">📊 Realizado Marketplace</div>
-              <div class="meta-card-value" style="font-size:1.1rem;">{brl(mp_m['receita'])}</div>
-              <div class="meta-bar-wrap"><div class="meta-bar-fill" style="width:{pct_mkt_mes:.1f}%;background:{cor_mkt};"></div></div>
-              <div style="display:flex;justify-content:space-between;margin-top:6px;">
-                <span class="meta-card-sub neu">{pct_mkt_mes:.1f}% da meta</span>
-                {dif_html(dif_mkt)}
-              </div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(compact_card("🏪", f"Marketplace — {mes_label_atual}",
+                m_mes["meta_mkt"], mp_m["receita"], mes_label_atual, "#f59e0b"), unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -862,72 +962,51 @@ with tab_metas:
         if m <= 0: return "#3b6fff"
         p = r/m*100
         return "#10b981" if p >= 100 else ("#f59e0b" if p >= 70 else "#f43f5e")
-    def dif_h(d):
-        cls = "pos" if d >= 0 else "neg"
-        s   = "+" if d >= 0 else ""
-        return f"<span class='meta-card-sub {cls}'>{s}{brl(d)}</span>"
     def cls_c(r, m):
         if m <= 0: return ""
-        return "ok" if r >= m else ("highlight" if r/m < 0.7 else "")
-
-    sh(f"Visão Anual — {ano_meta}")
-
-    ya1, ya2, ya3 = st.columns(3)
-    for col_w, lbl, meta, real, canal_cor in [
-        (ya1, "Total", m_ano_sel["meta_total"], m_ano_sel["real_total"], ""),
-        (ya2, "E-commerce", m_ano_sel["meta_ec"],    m_ano_sel["real_ec"],    "#3b6fff"),
-        (ya3, "Marketplace", m_ano_sel["meta_mkt"],   m_ano_sel["real_mkt"],   "#f59e0b"),
-    ]:
+        p = r/m*100
+        return "ok" if p >= 100 else ("warn2" if p >= 70 else "bad")
+    def seg_bar_m(pct, cor, n=20):
+        filled = round(pct/100*n)
+        return "<div class='seg-bar'>" + "".join(
+            f"<div class='seg filled' style='--seg-color:{cor};'></div>" if i < filled
+            else "<div class='seg'></div>" for i in range(n)
+        ) + "</div>"
+    def mc_card(icon, lbl, meta, real, canal_cor=""):
         pct = pct_b(real, meta)
         cor = cor_b(real, meta)
+        cls = cls_c(real, meta)
         dif = real - meta
-        with col_w:
-            st.markdown(f"""
-            <div class="meta-card {cls_c(real,meta)}">
-              <div class="meta-card-label" style="{'color:'+canal_cor+';' if canal_cor else ''}">
-                🎯 Meta Anual {lbl}</div>
-              <div class="meta-card-value">{brl(meta)}</div>
-              <hr class="meta-sep"/>
-              <div class="meta-card-label">✅ Realizado no Ano</div>
-              <div class="meta-card-value" style="font-size:1.1rem;">{brl(real)}</div>
-              <div class="meta-bar-wrap">
-                <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{cor};"></div>
-              </div>
-              <div style="display:flex;justify-content:space-between;margin-top:6px;">
-                <span class="meta-card-sub neu">{pct:.1f}% da meta</span>
-                {dif_h(dif)}
-              </div>
-            </div>""", unsafe_allow_html=True)
+        s = "+" if dif >= 0 else ""
+        dc = "pos" if dif >= 0 else "neg"
+        cs = f"style='color:{canal_cor};'" if canal_cor else ""
+        return f"""<div class="mc {cls}">
+          <div class="mc-icon" {cs}>{icon}</div>
+          <div class="mc-label" {cs}>{lbl}</div>
+          <div class="mc-value">{brl(real)}</div>
+          <div class="mc-sub">
+            <span class="{dc}">{s}{brl(dif)}</span>
+            <span class="dot-sep">·</span>
+            <span class="neu">{pct:.0f}% da meta</span>
+          </div>
+          {seg_bar_m(pct, cor)}
+          <div class="mc-progress-row">
+            <span class="mc-pct">Meta: {brl(meta)}</span>
+          </div>
+        </div>"""
+
+    sh(f"Visão Anual — {ano_meta}")
+    ya1, ya2, ya3 = st.columns(3)
+    with ya1: st.markdown(mc_card("🎯","Total",          m_ano_sel["meta_total"],m_ano_sel["real_total"],""),         unsafe_allow_html=True)
+    with ya2: st.markdown(mc_card("🛒","E-commerce",     m_ano_sel["meta_ec"],   m_ano_sel["real_ec"],   "#3b6fff"), unsafe_allow_html=True)
+    with ya3: st.markdown(mc_card("🏪","Marketplace",    m_ano_sel["meta_mkt"],  m_ano_sel["real_mkt"],  "#f59e0b"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     sh(f"Acumulado até {hoje_meta.strftime('%B/%Y')} — {ano_meta}")
-
     aa1, aa2, aa3 = st.columns(3)
-    for col_w, lbl, meta, real, canal_cor in [
-        (aa1, "Total",       m_acu_sel["meta_total"], m_acu_sel["real_total"], ""),
-        (aa2, "E-commerce",  m_acu_sel["meta_ec"],    m_acu_sel["real_ec"],    "#3b6fff"),
-        (aa3, "Marketplace", m_acu_sel["meta_mkt"],   m_acu_sel["real_mkt"],   "#f59e0b"),
-    ]:
-        pct = pct_b(real, meta)
-        cor = cor_b(real, meta)
-        dif = real - meta
-        with col_w:
-            st.markdown(f"""
-            <div class="meta-card {cls_c(real,meta)}">
-              <div class="meta-card-label" style="{'color:'+canal_cor+';' if canal_cor else ''}">
-                📊 Meta Acumulada {lbl}</div>
-              <div class="meta-card-value">{brl(meta)}</div>
-              <hr class="meta-sep"/>
-              <div class="meta-card-label">✅ Realizado Acumulado</div>
-              <div class="meta-card-value" style="font-size:1.1rem;">{brl(real)}</div>
-              <div class="meta-bar-wrap">
-                <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{cor};"></div>
-              </div>
-              <div style="display:flex;justify-content:space-between;margin-top:6px;">
-                <span class="meta-card-sub neu">{pct:.1f}% da meta</span>
-                {dif_h(dif)}
-              </div>
-            </div>""", unsafe_allow_html=True)
+    with aa1: st.markdown(mc_card("📊","Total Acumulado",     m_acu_sel["meta_total"],m_acu_sel["real_total"],""),         unsafe_allow_html=True)
+    with aa2: st.markdown(mc_card("🛒","E-commerce Acumulado",m_acu_sel["meta_ec"],   m_acu_sel["real_ec"],   "#3b6fff"), unsafe_allow_html=True)
+    with aa3: st.markdown(mc_card("🏪","Marketplace Acumulado",m_acu_sel["meta_mkt"], m_acu_sel["real_mkt"],  "#f59e0b"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     sh("Detalhe Mensal por Canal")
