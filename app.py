@@ -448,13 +448,17 @@ def load_url(url, tipo):
             url = (f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv"
                    + (f"&gid={gid}" if gid else ""))
         r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+        if r.status_code == 403:
+            raise Exception("Acesso negado (403). Verifique se a planilha está compartilhada como 'Qualquer pessoa com o link → Leitor'.")
+        if r.status_code == 404:
+            raise Exception("Planilha não encontrada (404). Verifique o ID e o GID da aba.")
         r.raise_for_status()
         try:    raw = r.content.decode("utf-8")
         except: raw = r.content.decode("latin-1")
         df = parse_csv(raw, tipo)
         return df, datetime.now().strftime("%d/%m/%Y %H:%M")
     except Exception as e:
-        st.error(f"Erro ao carregar: {e}"); return None, None
+        raise e
 
 def parse_csv(text, tipo):
     if tipo == "ec":
@@ -650,35 +654,62 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
         gid_ac  = gcols[3].text_input("Acessos",      value="3",   key="gid_ac")
         gid_ca  = gcols[4].text_input("Campanhas",    value="4",   key="gid_ca")
 
+        st.markdown(
+            "<div style='font-size:.74rem;color:#f59e0b;margin-top:8px;padding:8px 12px;"
+            "background:rgba(245,158,11,.08);border-radius:8px;border:1px solid rgba(245,158,11,.2);'>"
+            "⚠️ <strong>Antes de carregar:</strong> a planilha deve estar compartilhada publicamente. "
+            "No Google Sheets: <em>Arquivo → Compartilhar → Qualquer pessoa com o link → Leitor</em>.</div>",
+            unsafe_allow_html=True)
+
         if st.button("Carregar Planilha", use_container_width=True, key="btn_sheet"):
             url = sheet_url.strip()
             if not url:
                 st.warning("Insira a URL da planilha.")
+            elif "/d/" not in url:
+                st.error("URL inválida. Copie o link direto da barra de endereço do Google Sheets.")
             else:
-                sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else url
-                erros = []
-                with st.spinner("Carregando abas..."):
-                    raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf), "mp")
-                    if raw_mp is not None and not raw_mp.empty:
-                        st.session_state.df_mp_raw = raw_mp
-                        st.session_state.ts_mp = ts_mp_
-                        st.session_state.sheet_id = sid
-                        st.session_state.gid_ac = gid_ac
-                        st.session_state.gid_ca = gid_ca
-                        st.session_state.gid_met_custom = gid_met
+                sid = url.split("/d/")[1].split("/")[0]
+                log_msgs = []
+                ok_mp = False
+
+                with st.spinner("Carregando aba Marketplace/NF..."):
+                    try:
+                        raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf), "mp")
+                        if raw_mp is not None and not raw_mp.empty:
+                            st.session_state.df_mp_raw = raw_mp
+                            st.session_state.ts_mp     = ts_mp_
+                            st.session_state.sheet_id  = sid
+                            st.session_state.gid_ac    = gid_ac
+                            st.session_state.gid_ca    = gid_ca
+                            log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas")
+                            ok_mp = True
+                        else:
+                            log_msgs.append("❌ Marketplace/NF: sem dados (verifique o GID e permissões)")
+                    except Exception as e:
+                        log_msgs.append(f"❌ Marketplace/NF: {e}")
+
+                with st.spinner("Carregando aba E-commerce..."):
+                    try:
+                        raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec), "ec")
+                        if raw_ec is not None and not raw_ec.empty:
+                            st.session_state.df_ec_raw = raw_ec
+                            st.session_state.ts_ec     = ts_ec_
+                            log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas")
+                        else:
+                            log_msgs.append("⚪ E-commerce: não carregado (opcional)")
+                    except Exception as e:
+                        log_msgs.append(f"⚪ E-commerce: {e} (opcional)")
+
+                for msg in log_msgs:
+                    if msg.startswith("✅"):
+                        st.success(msg)
+                    elif msg.startswith("❌"):
+                        st.error(msg)
                     else:
-                        erros.append("Marketplace/NF")
-                    raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec), "ec")
-                    if raw_ec is not None and not raw_ec.empty:
-                        st.session_state.df_ec_raw = raw_ec
-                        st.session_state.ts_ec = ts_ec_
-                    else:
-                        erros.append("E-commerce")
-                if erros:
-                    st.warning(f"Abas não carregadas: {', '.join(erros)}")
-                else:
-                    st.success("✅ Planilha carregada com sucesso!")
-                st.rerun()
+                        st.info(msg)
+
+                if ok_mp:
+                    st.rerun()
 
     with ex2:
         st.markdown("**Status**")
