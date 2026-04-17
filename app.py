@@ -184,6 +184,33 @@ IMG_BASE_URL = "https://storage.googleapis.com/banco-imagens/Relogios"
 IMG_EXT      = ".jpg"
 META_URL = "https://docs.google.com/spreadsheets/d/1r4WwX_UjF12weYCYn3P5D2BzAJUhXrdJ2oQk95CgupE/export?format=csv"
 
+# GIDs das abas da planilha unificada — atualizar quando o link for confirmado
+SHEET_BASE    = ""  # ID da planilha unificada (preenchido no expander)
+GID_NF        = "0"
+GID_EC        = "1"
+GID_METAS     = "2"
+GID_ACESSOS   = "3"
+GID_CAMPANHAS = "4"
+
+COR_CLUSTER = {
+    "🌳 Orgânico":        "#10b981",
+    "🟢 Google Ads":      "#3b6fff",
+    "🔵 Meta Ads":        "#f59e0b",
+    "🔴 Livelo":          "#f43f5e",
+    "🟡 Direto":          "#64748b",
+    "🟡 Mais Plataforma": "#8b5cf6",
+    "🔵 City Ads":        "#06b6d4",
+    "⚫ CRM Bônus":       "#475569",
+    "🟣 Social":          "#ec4899",
+    "🟣 Livelo":          "#fb7185",
+    "🍪 Perda de Cookies":"#94a3b8",
+    "Outros":             "#334155",
+}
+COR_PLAT = {
+    "meta_ads":   "#f59e0b",
+    "google_ads": "#3b6fff",
+}
+
 EC_COLS_19 = [
     "order","created_at","customer_name","state","status","utmsource",
     "marketingtags","payment_method","installments","quantity_sku","phone",
@@ -314,6 +341,82 @@ def metas_acumulado(df_meta: pd.DataFrame, ano: int, ate_mes: int) -> dict:
         "real_total": float(rows["Realizado REAL TOTAL"].sum()),
         "dif":        float(rows["DIF"].sum()),
     }
+
+
+def parse_brl_num(s):
+    try:
+        return float(str(s).strip().replace("R$ ","").replace(".","").replace(",","."))
+    except Exception:
+        return 0.0
+
+def parse_sessions_num(s):
+    try:
+        return float(str(s).strip().replace(".","").replace(",","."))
+    except Exception:
+        return 0.0
+
+def parse_mult_num(s):
+    try:
+        return float(str(s).strip().replace("x",""))
+    except Exception:
+        return 0.0
+
+def parse_pct_num(s):
+    try:
+        return float(str(s).strip().replace("%","").replace(",","."))
+    except Exception:
+        return 0.0
+
+@st.cache_data(ttl=300)
+def load_campanhas(url: str) -> pd.DataFrame:
+    try:
+        r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+        r.raise_for_status()
+        try:    text = r.content.decode("utf-8")
+        except: text = r.content.decode("latin-1")
+        df = pd.read_csv(StringIO(text), dtype=str)
+        df.columns = list(df.columns[:-2]) + ["marca","data"]
+        df["data_dt"]  = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
+        df["inv"]      = df["Investimento"].apply(parse_brl_num)
+        df["rec_num"]  = df["Receita"].apply(parse_brl_num)
+        df["roas_num"] = df["ROAS"].apply(parse_mult_num)
+        df["roas1_num"]= df["ROAS 1ª Compra"].apply(parse_mult_num)
+        df["cpa_num"]  = df["CPA"].apply(parse_brl_num)
+        df["trans"]    = pd.to_numeric(df["Transações"], errors="coerce").fillna(0).astype(int)
+        df["trans1"]   = pd.to_numeric(df["Trans. 1ª Compra"], errors="coerce").fillna(0).astype(int)
+        return df.dropna(subset=["data_dt"])
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def load_acessos(url: str) -> pd.DataFrame:
+    try:
+        r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+        r.raise_for_status()
+        try:    text = r.content.decode("utf-8")
+        except: text = r.content.decode("latin-1")
+        df = pd.read_csv(StringIO(text), dtype=str)
+        # Last unnamed col is data, second-to-last is Marca
+        cols = list(df.columns)
+        if cols[-1].startswith("Unnamed"):
+            cols[-1] = "data"
+        df.columns = cols
+        df["data_dt"]     = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
+        df["sessoes_num"] = df["Sessões"].apply(parse_sessions_num)
+        df["pedidos_num"] = pd.to_numeric(df["Pedidos"], errors="coerce").fillna(0).astype(int)
+        df["pagos_num"]   = pd.to_numeric(df["Pedidos Pagos"], errors="coerce").fillna(0).astype(int)
+        df["receita_num"] = df["Receita Paga"].apply(parse_brl_num)
+        df["novos_num"]   = pd.to_numeric(df["Novos Clientes"], errors="coerce").fillna(0).astype(int)
+        df["rec_novos"]   = df["Receita Novos"].apply(parse_brl_num)
+        df["tx_conv"]     = df["Taxa Conv."].apply(parse_pct_num)
+        df["tx_carr"]     = df["Taxa Carrinho"].apply(parse_pct_num)
+        return df.dropna(subset=["data_dt"])
+    except Exception:
+        return pd.DataFrame()
+
+
+def gid_url(sheet_id: str, gid: str) -> str:
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
 def metas_ano(df_meta: pd.DataFrame, ano: int) -> dict:
     rows = df_meta[df_meta["mes_dt"].dt.year == ano]
@@ -524,85 +627,74 @@ ts_mp  = st.session_state.ts_mp or "—"
 ts_ec  = st.session_state.ts_ec or "—"
 
 
-with st.expander("⚙️  Fontes de Dados", expanded=not has_mp):
-    c1, c2, c3 = st.columns([2, 2, 1])
-
-    with c1:
-        st.markdown("**📋 Planilha de Faturamento (Notas Fiscais)**")
+with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
+    ex1, ex2 = st.columns([3, 1])
+    with ex1:
+        st.markdown("**📋 Planilha Unificada (Google Sheets)**")
         st.markdown(
             "<div style='font-size:.74rem;color:#64748b;margin-bottom:8px;'>"
-            "Fonte principal de receita — colunas esperadas: "
-            "<code>DATA · NOTA · QUANTIDADE · VALOR · MARKETPLACE</code><br>"
-            "<code>Site Mondaine / Site Seculus / Site Timex / Multimarcas</code> → E-commerce &nbsp;|&nbsp; "
-            "demais → Marketplace</div>", unsafe_allow_html=True)
-        mp_url  = st.text_input("URL Google Sheets / CSV público", key="mp_url_in",
-                                placeholder="https://docs.google.com/spreadsheets/d/...")
-        mp_file = st.file_uploader("ou upload direto do arquivo CSV", type=["csv","txt"], key="mp_up")
-        if st.button("Carregar Faturamento", use_container_width=True, key="btn_mp"):
-            raw = None; ts = None
-            if mp_file is not None:
-                try:
-                    raw = read_upload(mp_file, "mp")
-                    ts  = datetime.now().strftime("%d/%m/%Y %H:%M")
-                except Exception as e:
-                    st.error(f"Erro ao ler arquivo: {e}")
-            elif mp_url.strip():
-                with st.spinner("Carregando..."):
-                    raw, ts = load_url(mp_url.strip(), "mp")
-            if raw is not None and not raw.empty:
-                st.session_state.df_mp_raw = raw
-                st.session_state.ts_mp = ts
-                st.success(f"✅ {len(raw)} linhas · colunas: {list(raw.columns)}")
-                st.rerun()
-            elif raw is not None:
-                st.warning("Arquivo carregado mas sem dados.")
-
-    with c2:
-        st.markdown("**🛒 Planilha E-commerce (Enriquecimento)**")
-        st.markdown(
-            "<div style='font-size:.74rem;color:#64748b;margin-bottom:8px;'>"
-            "Valida status dos pedidos, UTM Source e ranking de produtos.<br>"
-            "Arquivo sem cabeçalho — primeira linha já contém dados.</div>",
+            "Cole o link da planilha que contém todas as abas: "
+            "<strong>E-commerce · Marketplace · Metas · Acessos · Campanhas</strong><br>"
+            "O dashboard carrega cada aba automaticamente pelo número da guia (gid).</div>",
             unsafe_allow_html=True)
-        ec_url  = st.text_input("URL Google Sheets / CSV público", key="ec_url_in",
-                                placeholder="https://docs.google.com/spreadsheets/d/...")
-        ec_file = st.file_uploader("ou upload direto do arquivo CSV", type=["csv","txt"], key="ec_up")
-        if st.button("Carregar E-commerce", use_container_width=True, key="btn_ec"):
-            raw = None; ts = None
-            if ec_file is not None:
-                try:
-                    raw = read_upload(ec_file, "ec")
-                    ts  = datetime.now().strftime("%d/%m/%Y %H:%M")
-                except Exception as e:
-                    st.error(f"Erro ao ler arquivo: {e}")
-            elif ec_url.strip():
-                with st.spinner("Carregando..."):
-                    raw, ts = load_url(ec_url.strip(), "ec")
-            if raw is not None and not raw.empty:
-                st.session_state.df_ec_raw = raw
-                st.session_state.ts_ec = ts
-                st.success(f"✅ {len(raw)} linhas")
-                st.rerun()
-            elif raw is not None:
-                st.warning("Arquivo carregado mas sem dados.")
+        sheet_url = st.text_input("URL da Planilha Google Sheets", key="sheet_url_in",
+                                  placeholder="https://docs.google.com/spreadsheets/d/...")
+        st.markdown(
+            "<div style='font-size:.74rem;color:#64748b;margin-top:6px;'>"
+            "GIDs das abas (0=Marketplace, 1=E-commerce, 2=Metas, 3=Acessos, 4=Campanhas) "
+            "— ajuste se necessário:</div>", unsafe_allow_html=True)
+        gcols = st.columns(5)
+        gid_nf  = gcols[0].text_input("Marketplace", value="0",   key="gid_nf")
+        gid_ec  = gcols[1].text_input("E-commerce",  value="1",   key="gid_ec")
+        gid_met = gcols[2].text_input("Metas",        value="2",   key="gid_met")
+        gid_ac  = gcols[3].text_input("Acessos",      value="3",   key="gid_ac")
+        gid_ca  = gcols[4].text_input("Campanhas",    value="4",   key="gid_ca")
 
-    with c3:
-        st.markdown("**📥 Templates**")
-        tpl_mp = "DATA,NOTA,QUANTIDADE,VALOR,MARKETPLACE\n01/04/2026,NF001,1,\"269,10\",Livelo\n01/04/2026,NF002,2,\"350,00\",Site Seculus\n01/04/2026,NF003,1,\"180,00\",Multimarcas\n01/04/2026,NF004,1,\"450,00\",Site Mondaine"
-        tpl_ec = ",".join(EC_COLS_17)+"\nPED001,2026-04-01 10:00:00Z,Cliente,SP,Faturado,google-shopping,Pix,1,1,,SKU001,Relógio Slim,350.00,350.00,,Seculus,"
-        st.download_button("⬇️ Template NF", data=tpl_mp, file_name="template_nf.csv",
-                           mime="text/csv", use_container_width=True)
-        st.download_button("⬇️ Template EC", data=tpl_ec, file_name="template_ec.csv",
-                           mime="text/csv", use_container_width=True)
-        st.markdown(f"**Status:**  {'🟢' if has_mp else '🔴'} NF &nbsp; {'🟢' if has_ec else '⚪'} EC",
-                    unsafe_allow_html=True)
+        if st.button("Carregar Planilha", use_container_width=True, key="btn_sheet"):
+            url = sheet_url.strip()
+            if not url:
+                st.warning("Insira a URL da planilha.")
+            else:
+                sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else url
+                erros = []
+                with st.spinner("Carregando abas..."):
+                    raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf), "mp")
+                    if raw_mp is not None and not raw_mp.empty:
+                        st.session_state.df_mp_raw = raw_mp
+                        st.session_state.ts_mp = ts_mp_
+                        st.session_state.sheet_id = sid
+                        st.session_state.gid_ac = gid_ac
+                        st.session_state.gid_ca = gid_ca
+                        st.session_state.gid_met_custom = gid_met
+                    else:
+                        erros.append("Marketplace/NF")
+                    raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec), "ec")
+                    if raw_ec is not None and not raw_ec.empty:
+                        st.session_state.df_ec_raw = raw_ec
+                        st.session_state.ts_ec = ts_ec_
+                    else:
+                        erros.append("E-commerce")
+                if erros:
+                    st.warning(f"Abas não carregadas: {', '.join(erros)}")
+                else:
+                    st.success("✅ Planilha carregada com sucesso!")
+                st.rerun()
+
+    with ex2:
+        st.markdown("**Status**")
+        st.markdown(
+            f"{'🟢' if has_mp else '🔴'} Faturamento<br>"
+            f"{'🟢' if has_ec else '⚪'} E-commerce<br>"
+            f"{'🟢' if st.session_state.get('sheet_id') else '⚪'} Acessos/Campanhas",
+            unsafe_allow_html=True)
         if has_mp:
+            st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔄 Limpar dados", use_container_width=True):
-                st.session_state.df_mp_raw = None
-                st.session_state.df_ec_raw = None
-                st.session_state.ts_mp = None
-                st.session_state.ts_ec = None
+                for k in ["df_mp_raw","df_ec_raw","ts_mp","ts_ec","sheet_id"]:
+                    st.session_state[k] = None
                 load_url.clear()
+                load_campanhas.clear()
+                load_acessos.clear()
                 st.rerun()
 
 if not has_mp:
@@ -642,10 +734,35 @@ hoje = datetime.today().date()
 if "d_ini" not in st.session_state: st.session_state.d_ini = hoje.replace(day=1)
 if "d_fim" not in st.session_state: st.session_state.d_fim = hoje
 
-fr = st.columns([2, 2, 3])
-with fr[0]: data_ini = st.date_input("De",  value=st.session_state.d_ini, key="d_ini", format="DD/MM/YYYY")
-with fr[1]: data_fim = st.date_input("Até", value=st.session_state.d_fim, key="d_fim", format="DD/MM/YYYY")
-with fr[2]: comp_modo = st.selectbox("Comparar com",
+# Build list of month options (last 24 months)
+import calendar as _cal
+_meses_opts = []
+for _i in range(23, -1, -1):
+    _m = (hoje.month - _i - 1) % 12 + 1
+    _y = hoje.year - ((_i + (12 - hoje.month)) // 12)
+    _meses_opts.append(date(_y, _m, 1))
+_meses_labels = [d.strftime("%b/%Y") for d in _meses_opts]
+_mes_atual_label = hoje.replace(day=1).strftime("%b/%Y")
+_mes_default_idx = _meses_labels.index(_mes_atual_label) if _mes_atual_label in _meses_labels else len(_meses_labels)-1
+
+if "mes_seletor" not in st.session_state: st.session_state.mes_seletor = _mes_default_idx
+
+fr = st.columns([2, 2, 2, 3])
+with fr[0]:
+    mes_idx = st.selectbox("Mês", range(len(_meses_labels)),
+                           format_func=lambda i: _meses_labels[i],
+                           index=st.session_state.mes_seletor, key="mes_seletor")
+    _mes_escolhido = _meses_opts[mes_idx]
+    _ultimo_dia = _cal.monthrange(_mes_escolhido.year, _mes_escolhido.month)[1]
+    _fim_mes = date(_mes_escolhido.year, _mes_escolhido.month, _ultimo_dia)
+    _fim_padrao = min(_fim_mes, hoje)
+    if st.session_state.d_ini != _mes_escolhido or st.session_state.d_fim != _fim_padrao:
+        st.session_state.d_ini = _mes_escolhido
+        st.session_state.d_fim = _fim_padrao
+        st.rerun()
+with fr[1]: data_ini = st.date_input("De",  value=st.session_state.d_ini, key="d_ini", format="DD/MM/YYYY")
+with fr[2]: data_fim = st.date_input("Até", value=st.session_state.d_fim, key="d_fim", format="DD/MM/YYYY")
+with fr[3]: comp_modo = st.selectbox("Comparar com",
     ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"], key="comp")
 
 ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
@@ -670,8 +787,9 @@ ec_pa_ec = fdt(df_ec, ini_ant, fim_ant) if not df_ec.empty else pd.DataFrame()
 ec_fat_a = ec_pa_ec[ec_pa_ec["faturado"]] if not ec_pa_ec.empty else pd.DataFrame()
 
 st.markdown("---")
-tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod = st.tabs([
-    "📊 Visão Geral", "🎯 Metas", "🛒 E-commerce", "🏪 Marketplace", "🏆 Produtos & SKUs",
+tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod, tab_acessos, tab_camp = st.tabs([
+    "📊 Visão Geral", "🎯 Metas", "🛒 E-commerce", "🏪 Marketplace",
+    "🏆 Produtos & SKUs", "📈 Acessos", "📣 Campanhas",
 ])
 
 with tab_geral:
@@ -835,29 +953,6 @@ with tab_geral:
             fig_mm.update_layout(**Li())
             st.plotly_chart(fig_mm, use_container_width=True)
 
-    if has_ec and not ec_fat.empty:
-        sh("UTM Source — Pedidos Faturados E-commerce")
-        utm_g = (ec_fat.drop_duplicates("order")
-                 .groupby("utmsource").agg(pedidos=("order","count")).reset_index()
-                 .sort_values("pedidos", ascending=False)
-                 .head(10))
-        utm_g["pct"] = utm_g["pedidos"] / utm_g["pedidos"].sum() * 100
-        utm_colors = [COR_UTM.get(s, "#64748b") for s in utm_g["utmsource"]]
-        ug1, ug2 = st.columns([2,1])
-        with ug1:
-            fig_utm = px.bar(utm_g, x="utmsource", y="pedidos",
-                             labels={"pedidos":"Pedidos Faturados","utmsource":"UTM Source"},
-                             text=utm_g["pedidos"].astype(str)+" ("+utm_g["pct"].map("{:.0f}%".format)+")")
-            fig_utm.update_traces(textposition="outside",
-                                  marker_color=utm_colors)
-            fig_utm.update_layout(**L())
-            st.plotly_chart(fig_utm, use_container_width=True)
-        with ug2:
-            fig_utmp = px.pie(utm_g, names="utmsource", values="pedidos", hole=0.58)
-            fig_utmp.update_traces(textinfo="percent+label", textfont_size=11,
-                                   marker=dict(colors=utm_colors))
-            fig_utmp.update_layout(**L(margin=dict(l=5,r=5,t=30,b=5)))
-            st.plotly_chart(fig_utmp, use_container_width=True)
 
 
 with tab_metas:
@@ -1352,6 +1447,191 @@ with tab_prod:
                                "receita":"Receita Total","qtd":"Quantidade","img_url":"URL Foto",
                            }).to_csv(index=False).encode("utf-8"),
                            file_name="itens_vendidos.csv", mime="text/csv")
+
+
+with tab_acessos:
+    _sid   = st.session_state.get("sheet_id","")
+    _gac   = st.session_state.get("gid_ac","3")
+    df_ac  = load_acessos(gid_url(_sid, _gac)) if _sid else pd.DataFrame()
+
+    if df_ac.empty:
+        st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de acessos.</div>", unsafe_allow_html=True)
+    else:
+        df_ac_f = df_ac[(df_ac["data_dt"] >= pd.Timestamp(data_ini)) &
+                        (df_ac["data_dt"] <= pd.Timestamp(data_fim))]
+
+        marcas_ac = sorted(df_ac_f["Marca"].dropna().unique().tolist()) if not df_ac_f.empty else []
+        marc_sel  = st.multiselect("Marca", marcas_ac, default=marcas_ac, key="ac_marc")
+        df_ac_f   = df_ac_f[df_ac_f["Marca"].isin(marc_sel)] if marc_sel else df_ac_f
+
+        if df_ac_f.empty:
+            st.info("Sem dados no período selecionado.")
+        else:
+            tot_sess   = int(df_ac_f["sessoes_num"].sum())
+            tot_pedidos= int(df_ac_f["pedidos_num"].sum())
+            tot_pagos  = int(df_ac_f["pagos_num"].sum())
+            tot_rec    = float(df_ac_f["receita_num"].sum())
+            tot_novos  = int(df_ac_f["novos_num"].sum())
+
+            sh("Resumo do Período")
+            k1,k2,k3,k4,k5 = st.columns(5)
+            k1.metric("👥 Sessões",       f"{tot_sess:,}")
+            k2.metric("🛒 Pedidos",       f"{tot_pedidos:,}")
+            k3.metric("✅ Pagos",          f"{tot_pagos:,}")
+            k4.metric("💰 Receita Paga",  brl(tot_rec))
+            k5.metric("🆕 Novos Clientes",f"{tot_novos:,}")
+
+            sh("Sessões por Canal")
+            ac_canal = (df_ac_f.groupby("Cluster")
+                        .agg(sessoes=("sessoes_num","sum"), pedidos=("pedidos_num","sum"),
+                             pagos=("pagos_num","sum"), receita=("receita_num","sum"))
+                        .reset_index().sort_values("sessoes", ascending=False))
+            ac_colors = [COR_CLUSTER.get(c,"#64748b") for c in ac_canal["Cluster"]]
+
+            ac1, ac2 = st.columns(2)
+            with ac1:
+                fig_sess = px.bar(ac_canal, x="Cluster", y="sessoes",
+                                  labels={"sessoes":"Sessões","Cluster":""},
+                                  text=ac_canal["sessoes"].map(lambda x: f"{int(x):,}"))
+                fig_sess.update_traces(textposition="outside", marker_color=ac_colors)
+                fig_sess.update_layout(**L(title="Sessões"))
+                st.plotly_chart(fig_sess, use_container_width=True)
+            with ac2:
+                fig_rec_ac = px.bar(ac_canal[ac_canal["receita"]>0], x="Cluster", y="receita",
+                                    labels={"receita":"Receita Paga (R$)","Cluster":""},
+                                    text=ac_canal[ac_canal["receita"]>0]["receita"].map(brl))
+                fig_rec_ac.update_traces(textposition="outside",
+                                         marker_color=[COR_CLUSTER.get(c,"#64748b")
+                                                       for c in ac_canal[ac_canal["receita"]>0]["Cluster"]])
+                fig_rec_ac.update_layout(**L(title="Receita por Canal"))
+                st.plotly_chart(fig_rec_ac, use_container_width=True)
+
+            sh("Evolução Diária de Sessões")
+            ac_daily = (df_ac_f.groupby(["data_dt","Cluster"])
+                        .agg(sessoes=("sessoes_num","sum")).reset_index())
+            fig_ac_ev = px.area(ac_daily, x="data_dt", y="sessoes", color="Cluster",
+                                color_discrete_map=COR_CLUSTER,
+                                labels={"sessoes":"Sessões","data_dt":"","Cluster":"Canal"})
+            fig_ac_ev.update_layout(**L())
+            st.plotly_chart(fig_ac_ev, use_container_width=True)
+
+            sh("Tabela por Canal e Marca")
+            ac_tab = (df_ac_f.groupby(["Marca","Cluster"])
+                      .agg(sessoes=("sessoes_num","sum"), pedidos=("pedidos_num","sum"),
+                           pagos=("pagos_num","sum"), receita=("receita_num","sum"),
+                           novos=("novos_num","sum"))
+                      .reset_index().sort_values(["Marca","receita"], ascending=[True,False]))
+            ac_tab["tx_conv"] = (ac_tab["pagos"] / ac_tab["sessoes"] * 100).where(ac_tab["sessoes"]>0, 0)
+            ac_tab_disp = ac_tab.copy()
+            ac_tab_disp["receita"] = ac_tab_disp["receita"].map(brl)
+            ac_tab_disp["tx_conv"] = ac_tab_disp["tx_conv"].map("{:.2f}%".format)
+            ac_tab_disp = ac_tab_disp.rename(columns={
+                "Marca":"Marca","Cluster":"Canal","sessoes":"Sessões","pedidos":"Pedidos",
+                "pagos":"Pagos","receita":"Receita Paga","novos":"Novos","tx_conv":"Conv."})
+            st.dataframe(ac_tab_disp, use_container_width=True, hide_index=True)
+
+
+with tab_camp:
+    _sid   = st.session_state.get("sheet_id","")
+    _gca   = st.session_state.get("gid_ca","4")
+    df_ca  = load_campanhas(gid_url(_sid, _gca)) if _sid else pd.DataFrame()
+
+    if df_ca.empty:
+        st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de campanhas.</div>", unsafe_allow_html=True)
+    else:
+        df_ca_f = df_ca[(df_ca["data_dt"] >= pd.Timestamp(data_ini)) &
+                        (df_ca["data_dt"] <= pd.Timestamp(data_fim))]
+
+        c_top1, c_top2 = st.columns([2,1])
+        with c_top1:
+            marcas_ca = sorted(df_ca_f["marca"].dropna().unique().tolist()) if not df_ca_f.empty else []
+            marc_ca   = st.multiselect("Marca", marcas_ca, default=marcas_ca, key="ca_marc")
+        with c_top2:
+            plats_ca  = sorted(df_ca_f["Plataforma"].dropna().unique().tolist()) if not df_ca_f.empty else []
+            plat_ca   = st.multiselect("Plataforma", plats_ca, default=plats_ca, key="ca_plat")
+
+        df_ca_f = df_ca_f[df_ca_f["marca"].isin(marc_ca)] if marc_ca else df_ca_f
+        df_ca_f = df_ca_f[df_ca_f["Plataforma"].isin(plat_ca)] if plat_ca else df_ca_f
+
+        if df_ca_f.empty:
+            st.info("Sem dados de campanhas no período selecionado.")
+        else:
+            tot_inv   = float(df_ca_f["inv"].sum())
+            tot_rec_c = float(df_ca_f["rec_num"].sum())
+            tot_trans = int(df_ca_f["trans"].sum())
+            roas_med  = tot_rec_c / tot_inv if tot_inv > 0 else 0
+            cpa_med   = tot_inv / tot_trans if tot_trans > 0 else 0
+
+            sh("Resumo de Campanhas do Período")
+            ck1,ck2,ck3,ck4,ck5 = st.columns(5)
+            ck1.metric("💸 Investimento", brl(tot_inv))
+            ck2.metric("💰 Receita",      brl(tot_rec_c))
+            ck3.metric("📦 Transações",   f"{tot_trans:,}")
+            ck4.metric("📈 ROAS Médio",   f"{roas_med:.2f}x")
+            ck5.metric("🎯 CPA Médio",    brl(cpa_med))
+
+            sh("Investimento vs Receita por Campanha")
+            camp_agg = (df_ca_f.groupby(["Plataforma","Campanha"])
+                        .agg(inv=("inv","sum"), receita=("rec_num","sum"),
+                             trans=("trans","sum"), cpa=("cpa_num","mean"),
+                             roas=("roas_num","mean"))
+                        .reset_index().sort_values("receita", ascending=False))
+            camp_agg["roas_fmt"] = camp_agg["roas"].map("{:.2f}x".format)
+            camp_colors = [COR_PLAT.get(p,"#64748b") for p in camp_agg["Plataforma"]]
+
+            ca1, ca2 = st.columns(2)
+            with ca1:
+                fig_inv = go.Figure()
+                fig_inv.add_trace(go.Bar(name="Investimento", x=camp_agg["Campanha"].str[:30],
+                                         y=camp_agg["inv"], marker_color="rgba(100,116,139,.5)",
+                                         marker_line_width=0))
+                fig_inv.add_trace(go.Bar(name="Receita", x=camp_agg["Campanha"].str[:30],
+                                         y=camp_agg["receita"],
+                                         marker_color=camp_colors, marker_line_width=0))
+                fig_inv.update_layout(barmode="group", **L(title="Investimento vs Receita"),
+                                      xaxis_tickangle=-30)
+                st.plotly_chart(fig_inv, use_container_width=True)
+            with ca2:
+                fig_roas = px.bar(camp_agg[camp_agg["roas"]>0],
+                                  x="Campanha", y="roas", color="Plataforma",
+                                  color_discrete_map=COR_PLAT,
+                                  labels={"roas":"ROAS","Campanha":""},
+                                  text=camp_agg[camp_agg["roas"]>0]["roas_fmt"],
+                                  title="ROAS por Campanha")
+                fig_roas.update_traces(textposition="outside")
+                fig_roas.update_layout(**L(), xaxis_tickangle=-30)
+                st.plotly_chart(fig_roas, use_container_width=True)
+
+            sh("Evolução Diária — Investimento e Receita")
+            ca_daily = (df_ca_f.groupby(["data_dt","Plataforma"])
+                        .agg(inv=("inv","sum"), receita=("rec_num","sum")).reset_index())
+            fig_ca_ev = go.Figure()
+            for plat, grp in ca_daily.groupby("Plataforma"):
+                cor_p = COR_PLAT.get(plat,"#64748b")
+                fig_ca_ev.add_trace(go.Scatter(x=grp["data_dt"], y=grp["inv"], name=f"{plat} — Invest.",
+                    mode="lines", line=dict(color=cor_p, width=1.5, dash="dot")))
+                fig_ca_ev.add_trace(go.Scatter(x=grp["data_dt"], y=grp["receita"], name=f"{plat} — Receita",
+                    mode="lines", fill="tozeroy",
+                    line=dict(color=cor_p, width=2),
+                    fillcolor=f"rgba{tuple(list(bytes.fromhex(cor_p.lstrip('#'))) + [30])}"))
+            fig_ca_ev.update_layout(**L())
+            st.plotly_chart(fig_ca_ev, use_container_width=True)
+
+            sh("Tabela Detalhada de Campanhas")
+            camp_tab = camp_agg.copy()
+            camp_tab["inv"]     = camp_tab["inv"].map(brl)
+            camp_tab["receita"] = camp_tab["receita"].map(brl)
+            camp_tab["cpa"]     = camp_tab["cpa"].map(brl)
+            camp_tab["roas"]    = camp_tab["roas_fmt"]
+            camp_tab = camp_tab.rename(columns={
+                "Plataforma":"Plataforma","Campanha":"Campanha","inv":"Investimento",
+                "receita":"Receita","trans":"Transações","roas":"ROAS","cpa":"CPA Médio"})
+            st.dataframe(camp_tab[["Plataforma","Campanha","Investimento","Receita",
+                                   "Transações","ROAS","CPA Médio"]],
+                         use_container_width=True, hide_index=True)
+            st.download_button("📥 Exportar Campanhas",
+                               data=df_ca_f.to_csv(index=False).encode("utf-8"),
+                               file_name="campanhas.csv", mime="text/csv")
 
 
 st.markdown("---")
