@@ -429,48 +429,42 @@ def _fetch_sheet_csv(sid: str, gid: str, token: str) -> str:
 
 
 @st.cache_data(ttl=270)
-def load_campanhas(url: str, token: str = "") -> pd.DataFrame:
-    try:
-        sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else ""
-        gid = url.split("gid=")[1].split("&")[0] if "gid=" in url else "0"
-        text = _fetch_sheet_csv(sid, gid, token)
-        df = pd.read_csv(StringIO(text), dtype=str)
-        df.columns = list(df.columns[:-2]) + ["marca","data"]
-        df["data_dt"]  = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
-        df["inv"]      = df["Investimento"].apply(parse_brl_num)
-        df["rec_num"]  = df["Receita"].apply(parse_brl_num)
-        df["roas_num"] = df["ROAS"].apply(parse_mult_num)
-        df["roas1_num"]= df["ROAS 1ª Compra"].apply(parse_mult_num)
-        df["cpa_num"]  = df["CPA"].apply(parse_brl_num)
-        df["trans"]    = pd.to_numeric(df["Transações"], errors="coerce").fillna(0).astype(int)
-        df["trans1"]   = pd.to_numeric(df["Trans. 1ª Compra"], errors="coerce").fillna(0).astype(int)
-        return df.dropna(subset=["data_dt"])
-    except Exception:
-        return pd.DataFrame()
+def load_campanhas(url: str, token: str = "") -> tuple:
+    sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else ""
+    gid = url.split("gid=")[1].split("&")[0] if "gid=" in url else "0"
+    text = _fetch_sheet_csv(sid, gid, token)
+    df = pd.read_csv(StringIO(text), dtype=str)
+    df.columns = list(df.columns[:-2]) + ["marca","data"]
+    df["data_dt"]  = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
+    df["inv"]      = df["Investimento"].apply(parse_brl_num)
+    df["rec_num"]  = df["Receita"].apply(parse_brl_num)
+    df["roas_num"] = df["ROAS"].apply(parse_mult_num)
+    df["roas1_num"]= df["ROAS 1ª Compra"].apply(parse_mult_num)
+    df["cpa_num"]  = df["CPA"].apply(parse_brl_num)
+    df["trans"]    = pd.to_numeric(df["Transações"], errors="coerce").fillna(0).astype(int)
+    df["trans1"]   = pd.to_numeric(df["Trans. 1ª Compra"], errors="coerce").fillna(0).astype(int)
+    return df.dropna(subset=["data_dt"])
 
 @st.cache_data(ttl=270)
 def load_acessos(url: str, token: str = "") -> pd.DataFrame:
-    try:
-        sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else ""
-        gid = url.split("gid=")[1].split("&")[0] if "gid=" in url else "0"
-        text = _fetch_sheet_csv(sid, gid, token)
-        df = pd.read_csv(StringIO(text), dtype=str)
-        cols = list(df.columns)
-        if cols[-1].startswith("Unnamed"):
-            cols[-1] = "data"
-        df.columns = cols
-        df["data_dt"]     = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
-        df["sessoes_num"] = df["Sessões"].apply(parse_sessions_num)
-        df["pedidos_num"] = pd.to_numeric(df["Pedidos"], errors="coerce").fillna(0).astype(int)
-        df["pagos_num"]   = pd.to_numeric(df["Pedidos Pagos"], errors="coerce").fillna(0).astype(int)
-        df["receita_num"] = df["Receita Paga"].apply(parse_brl_num)
-        df["novos_num"]   = pd.to_numeric(df["Novos Clientes"], errors="coerce").fillna(0).astype(int)
-        df["rec_novos"]   = df["Receita Novos"].apply(parse_brl_num)
-        df["tx_conv"]     = df["Taxa Conv."].apply(parse_pct_num)
-        df["tx_carr"]     = df["Taxa Carrinho"].apply(parse_pct_num)
-        return df.dropna(subset=["data_dt"])
-    except Exception:
-        return pd.DataFrame()
+    sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else ""
+    gid = url.split("gid=")[1].split("&")[0] if "gid=" in url else "0"
+    text = _fetch_sheet_csv(sid, gid, token)
+    df = pd.read_csv(StringIO(text), dtype=str)
+    cols = list(df.columns)
+    if cols[-1].startswith("Unnamed"):
+        cols[-1] = "data"
+    df.columns = cols
+    df["data_dt"]     = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
+    df["sessoes_num"] = df["Sessões"].apply(parse_sessions_num)
+    df["pedidos_num"] = pd.to_numeric(df["Pedidos"], errors="coerce").fillna(0).astype(int)
+    df["pagos_num"]   = pd.to_numeric(df["Pedidos Pagos"], errors="coerce").fillna(0).astype(int)
+    df["receita_num"] = df["Receita Paga"].apply(parse_brl_num)
+    df["novos_num"]   = pd.to_numeric(df["Novos Clientes"], errors="coerce").fillna(0).astype(int)
+    df["rec_novos"]   = df["Receita Novos"].apply(parse_brl_num)
+    df["tx_conv"]     = df["Taxa Conv."].apply(parse_pct_num)
+    df["tx_carr"]     = df["Taxa Carrinho"].apply(parse_pct_num)
+    return df.dropna(subset=["data_dt"])
 
 
 def gid_url(sheet_id: str, gid: str) -> str:
@@ -851,7 +845,7 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                                 if hint in abas_inv: return abas_inv[hint]
                             return u                         # fallback to whatever user typed
 
-                        gid_nf_r  = _resolve_gid(gid_nf,  ["base dashboard - marketplace","marketplace","nf","faturamento"])
+                        gid_nf_r  = _resolve_gid(gid_nf,  ["base dashboard - marketplace","marketplace","nf","faturamento","base dashboard"])
                         gid_ec_r  = _resolve_gid(gid_ec,  ["base dashboard - e-commerce","e-commerce","ecommerce","ec"])
                         gid_ac_r  = _resolve_gid(gid_ac,  ["acessos","acesso"])
                         gid_ca_r  = _resolve_gid(gid_ca,  ["campanhas","campanha"])
@@ -867,8 +861,8 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                             st.session_state.df_mp_raw = raw_mp
                             st.session_state.ts_mp     = ts_mp_
                             st.session_state.sheet_id  = sid
-                            st.session_state.gid_ac    = gid_ac_r
-                            st.session_state.gid_ca    = gid_ca_r
+                            st.session_state._gid_ac = gid_ac_r
+                            st.session_state._gid_ca = gid_ca_r
                             log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas (gid={gid_nf_r})")
                             ok_mp = True
                         else:
@@ -1706,9 +1700,14 @@ with tab_prod:
 
 with tab_acessos:
     _sid   = st.session_state.get("sheet_id","")
-    _gac   = st.session_state.get("gid_ac","3")
+    _gac   = st.session_state.get("_gid_ac","3")
     _tok   = _get_sa_token()
-    df_ac  = load_acessos(gid_url(_sid, _gac), _tok) if _sid else pd.DataFrame()
+    df_ac  = pd.DataFrame()
+    if _sid:
+        try:
+            df_ac = load_acessos(gid_url(_sid, _gac), _tok)
+        except Exception as _e:
+            st.error(f"Erro ao carregar Acessos (gid={_gac}): {_e}")
 
     if df_ac.empty:
         st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de acessos.</div>", unsafe_allow_html=True)
@@ -1789,9 +1788,14 @@ with tab_acessos:
 
 with tab_camp:
     _sid   = st.session_state.get("sheet_id","")
-    _gca   = st.session_state.get("gid_ca","4")
+    _gca   = st.session_state.get("_gid_ca","4")
     _tok_c = _get_sa_token()
-    df_ca  = load_campanhas(gid_url(_sid, _gca), _tok_c) if _sid else pd.DataFrame()
+    df_ca  = pd.DataFrame()
+    if _sid:
+        try:
+            df_ca = load_campanhas(gid_url(_sid, _gca), _tok_c)
+        except Exception as _e:
+            st.error(f"Erro ao carregar Campanhas (gid={_gca}): {_e}")
 
     if df_ca.empty:
         st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de campanhas.</div>", unsafe_allow_html=True)
