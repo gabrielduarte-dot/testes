@@ -829,31 +829,62 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                 log_msgs = []
                 ok_mp = False
 
+                # Auto-detect GIDs by listing sheet tabs
+                with st.spinner("Lendo abas da planilha..."):
+                    try:
+                        sess = requests.Session(); sess.trust_env = False
+                        hdrs = {"User-Agent":"Mozilla/5.0"}
+                        if token: hdrs["Authorization"] = f"Bearer {token}"
+                        rm = sess.get(
+                            f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties",
+                            headers=hdrs, timeout=15)
+                        rm.raise_for_status()
+                        abas = {str(s["properties"]["sheetId"]): s["properties"]["title"]
+                                for s in rm.json().get("sheets", [])}
+                        abas_inv = {v.strip().lower(): k for k, v in abas.items()}
+                        st.info(f"Abas encontradas: {', '.join(abas.values())}")
+
+                        def _resolve_gid(user_input, name_hints):
+                            u = user_input.strip()
+                            if u in abas: return u          # exact gid match
+                            for hint in name_hints:
+                                if hint in abas_inv: return abas_inv[hint]
+                            return u                         # fallback to whatever user typed
+
+                        gid_nf_r  = _resolve_gid(gid_nf,  ["base dashboard - marketplace","marketplace","nf","faturamento"])
+                        gid_ec_r  = _resolve_gid(gid_ec,  ["base dashboard - e-commerce","e-commerce","ecommerce","ec"])
+                        gid_ac_r  = _resolve_gid(gid_ac,  ["acessos","acesso"])
+                        gid_ca_r  = _resolve_gid(gid_ca,  ["campanhas","campanha"])
+                    except Exception as e:
+                        st.error(f"Erro ao listar abas: {e}")
+                        gid_nf_r = gid_nf; gid_ec_r = gid_ec
+                        gid_ac_r = gid_ac; gid_ca_r = gid_ca
+
                 with st.spinner("Carregando aba Marketplace/NF..."):
                     try:
-                        raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf), "mp", token)
+                        raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf_r), "mp", token)
                         if raw_mp is not None and not raw_mp.empty:
                             st.session_state.df_mp_raw = raw_mp
                             st.session_state.ts_mp     = ts_mp_
                             st.session_state.sheet_id  = sid
-                            st.session_state.gid_ac    = gid_ac
-                            st.session_state.gid_ca    = gid_ca
-                            log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas")
+                            st.session_state.gid_ac    = gid_ac_r
+                            st.session_state.gid_ca    = gid_ca_r
+                            log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas (gid={gid_nf_r})")
                             ok_mp = True
                         else:
-                            log_msgs.append("❌ Marketplace/NF: sem dados — verifique o GID")
+                            log_msgs.append(f"❌ Marketplace/NF: sem dados (gid={gid_nf_r})")
                     except Exception as e:
                         log_msgs.append(f"❌ Marketplace/NF: {e}")
 
                 with st.spinner("Carregando aba E-commerce..."):
                     try:
-                        raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec), "ec", token)
+                        raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec_r), "ec", token)
                         if raw_ec is not None and not raw_ec.empty:
                             st.session_state.df_ec_raw = raw_ec
                             st.session_state.ts_ec     = ts_ec_
-                            log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas")
+                            log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas (gid={gid_ec_r})")
                         else:
-                            log_msgs.append("⚪ E-commerce: sem dados (opcional)")
+                            log_msgs.append(f"⚪ E-commerce: sem dados (gid={gid_ec_r}, opcional)")
                     except Exception as e:
                         log_msgs.append(f"⚪ E-commerce: {e} (opcional)")
 
