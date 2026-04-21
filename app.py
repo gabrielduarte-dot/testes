@@ -375,18 +375,65 @@ def parse_pct_num(s):
     except Exception:
         return 0.0
 
+def _fetch_sheet_csv(sid: str, gid: str, token: str) -> str:
+    """Fetch a sheet as CSV text. Uses Sheets API v4 with token, or export URL for public sheets."""
+    import csv as _csv, urllib.parse
+    from io import StringIO as _SIO
+
+    sess = requests.Session()
+    sess.trust_env = False
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    if token:
+        # Get sheet title from metadata
+        rm = sess.get(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties",
+            headers=headers, timeout=15)
+        if rm.status_code == 403:
+            raise Exception(
+                "Acesso negado (403). Verifique se a SA foi adicionada como Leitor na planilha.")
+        rm.raise_for_status()
+        sheet_title = None
+        for s in rm.json().get("sheets", []):
+            p = s.get("properties", {})
+            if str(p.get("sheetId","")) == str(gid):
+                sheet_title = p.get("title")
+                break
+        if not sheet_title:
+            raise Exception(f"Aba com gid={gid} não encontrada.")
+        # Fetch values
+        rd = sess.get(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{sid}"
+            f"/values/{urllib.parse.quote(sheet_title)}?valueRenderOption=FORMATTED_VALUE",
+            headers=headers, timeout=20)
+        rd.raise_for_status()
+        rows = rd.json().get("values", [])
+        if not rows:
+            raise Exception("A aba está vazia.")
+        buf = _SIO()
+        _csv.writer(buf).writerows(rows)
+        return buf.getvalue()
+    else:
+        r = sess.get(
+            f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid}",
+            headers=headers, timeout=20, allow_redirects=False)
+        if r.status_code in (301,302,303,307,308):
+            raise Exception("Planilha não pública. Configure o Service Account.")
+        if r.status_code == 403:
+            raise Exception("Acesso negado. Configure o Service Account.")
+        r.raise_for_status()
+        try:    return r.content.decode("utf-8")
+        except: return r.content.decode("latin-1")
+
+
 @st.cache_data(ttl=270)
 def load_campanhas(url: str, token: str = "") -> pd.DataFrame:
     try:
-        sess = requests.Session()
-        sess.trust_env = False
-        headers = {"User-Agent": "Mozilla/5.0"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        r = sess.get(url, timeout=20, headers=headers)
-        r.raise_for_status()
-        try:    text = r.content.decode("utf-8")
-        except: text = r.content.decode("latin-1")
+        sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else ""
+        gid = url.split("gid=")[1].split("&")[0] if "gid=" in url else "0"
+        text = _fetch_sheet_csv(sid, gid, token)
         df = pd.read_csv(StringIO(text), dtype=str)
         df.columns = list(df.columns[:-2]) + ["marca","data"]
         df["data_dt"]  = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
@@ -404,17 +451,10 @@ def load_campanhas(url: str, token: str = "") -> pd.DataFrame:
 @st.cache_data(ttl=270)
 def load_acessos(url: str, token: str = "") -> pd.DataFrame:
     try:
-        sess = requests.Session()
-        sess.trust_env = False
-        headers = {"User-Agent": "Mozilla/5.0"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        r = sess.get(url, timeout=20, headers=headers)
-        r.raise_for_status()
-        try:    text = r.content.decode("utf-8")
-        except: text = r.content.decode("latin-1")
+        sid = url.split("/d/")[1].split("/")[0] if "/d/" in url else ""
+        gid = url.split("gid=")[1].split("&")[0] if "gid=" in url else "0"
+        text = _fetch_sheet_csv(sid, gid, token)
         df = pd.read_csv(StringIO(text), dtype=str)
-        # Last unnamed col is data, second-to-last is Marca
         cols = list(df.columns)
         if cols[-1].startswith("Unnamed"):
             cols[-1] = "data"
@@ -491,39 +531,77 @@ def _sa_configured() -> bool:
 @st.cache_data(ttl=270)
 def load_url(url: str, tipo: str, token: str = "") -> tuple:
     try:
+        sid = None
+        gid = None
         url = url.strip()
         if "docs.google.com" in url:
             sid = url.split("/d/")[1].split("/")[0]
             gid = url.split("gid=")[1].split("&")[0].split("#")[0] if "gid=" in url else None
-            url = (f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv"
-                   + (f"&gid={gid}" if gid else ""))
+
         sess = requests.Session()
         sess.trust_env = False
         headers = {"User-Agent": "Mozilla/5.0"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        r = sess.get(url, timeout=20, headers=headers, allow_redirects=True)
-        if r.status_code == 403:
-            if token:
+
+        # With SA token: use Sheets API v4 to get sheet name then download as CSV
+        # This avoids the /export redirect to googleusercontent.com
+        if token and sid:
+            # Step 1: get sheet metadata to find the sheet name for the given gid
+            meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties"
+            rm = sess.get(meta_url, headers=headers, timeout=15)
+            if rm.status_code == 403:
                 raise Exception(
                     "Acesso negado (403) com Service Account. "
                     "Verifique se o e-mail da SA foi adicionado como Leitor na planilha.")
-            raise Exception(
-                "Acesso negado (403). Configure o Service Account nos Secrets do Streamlit.")
-        if r.status_code == 400 or "googleusercontent.com" in r.url:
-            if token:
+            rm.raise_for_status()
+            sheets_meta = rm.json().get("sheets", [])
+            sheet_title = None
+            for s in sheets_meta:
+                props = s.get("properties", {})
+                if gid is None or str(props.get("sheetId","")) == str(gid):
+                    sheet_title = props.get("title")
+                    break
+            if not sheet_title:
+                raise Exception(f"Aba com gid={gid} não encontrada na planilha.")
+
+            # Step 2: read all values via Sheets API v4
+            import urllib.parse
+            range_enc = urllib.parse.quote(f"{sheet_title}")
+            data_url = (f"https://sheets.googleapis.com/v4/spreadsheets/{sid}"
+                        f"/values/{range_enc}?valueRenderOption=FORMATTED_VALUE")
+            rd = sess.get(data_url, headers=headers, timeout=20)
+            rd.raise_for_status()
+            rows = rd.json().get("values", [])
+            if not rows:
+                raise Exception("A aba está vazia.")
+            # Convert to CSV text
+            import csv as _csv
+            from io import StringIO as _SIO
+            buf = _SIO()
+            w = _csv.writer(buf)
+            w.writerows(rows)
+            raw = buf.getvalue()
+        else:
+            # No token: try export URL directly (works only for public sheets)
+            export_url = (f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv"
+                          + (f"&gid={gid}" if gid else "")) if sid else url
+            r = sess.get(export_url, timeout=20, headers=headers, allow_redirects=False)
+            if r.status_code in (301, 302, 303, 307, 308):
                 raise Exception(
-                    "Erro 400 mesmo com Service Account. "
-                    "Verifique se a SA tem acesso à planilha e se os secrets estão corretos.")
-            raise Exception(
-                "Erro de autenticação (400). Configure o Service Account nos Secrets do Streamlit.")
-        if r.status_code == 404:
-            raise Exception("Planilha não encontrada (404). Verifique o ID e o GID da aba.")
-        r.raise_for_status()
-        try:    raw = r.content.decode("utf-8")
-        except: raw = r.content.decode("latin-1")
-        if "<html" in raw[:200].lower():
-            raise Exception("Google retornou HTML em vez de CSV. Verifique as permissões da SA.")
+                    "A planilha não está acessível publicamente. "
+                    "Configure o Service Account nos Secrets do Streamlit.")
+            if r.status_code == 403:
+                raise Exception(
+                    "Acesso negado (403). Configure o Service Account nos Secrets do Streamlit.")
+            r.raise_for_status()
+            try:    raw = r.content.decode("utf-8")
+            except: raw = r.content.decode("latin-1")
+            if "<html" in raw[:200].lower():
+                raise Exception(
+                    "Google retornou HTML em vez de CSV. "
+                    "Configure o Service Account nos Secrets do Streamlit.")
+
         df = parse_csv(raw, tipo)
         return df, datetime.now().strftime("%d/%m/%Y %H:%M")
     except Exception as e:
