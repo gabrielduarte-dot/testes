@@ -6,6 +6,14 @@ from io import StringIO
 import requests
 from datetime import datetime, timedelta, date
 import numpy as np
+import json
+
+try:
+    from google.oauth2 import service_account
+    from google.auth.transport.requests import Request as GoogleRequest
+    HAS_GOOGLE_AUTH = True
+except ImportError:
+    HAS_GOOGLE_AUTH = False
 
 st.set_page_config(
     page_title="Dashboard de Vendas · Grupo Seculus",
@@ -370,7 +378,10 @@ def parse_pct_num(s):
 @st.cache_data(ttl=300)
 def load_campanhas(url: str) -> pd.DataFrame:
     try:
-        r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+        sess = requests.Session()
+        sess.trust_env = False
+        auth_hdr = _sa_auth_header()
+        r = sess.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0", **auth_hdr})
         r.raise_for_status()
         try:    text = r.content.decode("utf-8")
         except: text = r.content.decode("latin-1")
@@ -391,7 +402,10 @@ def load_campanhas(url: str) -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_acessos(url: str) -> pd.DataFrame:
     try:
-        r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+        sess = requests.Session()
+        sess.trust_env = False
+        auth_hdr = _sa_auth_header()
+        r = sess.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0", **auth_hdr})
         r.raise_for_status()
         try:    text = r.content.decode("utf-8")
         except: text = r.content.decode("latin-1")
@@ -418,6 +432,9 @@ def load_acessos(url: str) -> pd.DataFrame:
 def gid_url(sheet_id: str, gid: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
+def gid_pub_url(sheet_id: str, gid: str) -> str:
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=csv&gid={gid}"
+
 def metas_ano(df_meta: pd.DataFrame, ano: int) -> dict:
     rows = df_meta[df_meta["mes_dt"].dt.year == ano]
     if rows.empty:
@@ -438,6 +455,32 @@ for k, v in [("df_mp_raw", None),("df_ec_raw", None),
     if k not in st.session_state:
         st.session_state[k] = v
 
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly",
+          "https://www.googleapis.com/auth/drive.readonly"]
+
+def _get_sa_creds():
+    """Load Service Account credentials from Streamlit secrets. Returns None if not configured."""
+    if not HAS_GOOGLE_AUTH:
+        return None
+    try:
+        sa_info = dict(st.secrets["gcp_service_account"])
+        creds = service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
+        return creds
+    except Exception:
+        return None
+
+def _sa_auth_header():
+    """Return Authorization header dict using SA token, or empty dict if unavailable."""
+    creds = _get_sa_creds()
+    if creds is None:
+        return {}
+    try:
+        if not creds.valid:
+            creds.refresh(GoogleRequest())
+        return {"Authorization": f"Bearer {creds.token}"}
+    except Exception:
+        return {}
+
 @st.cache_data(ttl=300)
 def load_url(url, tipo):
     try:
@@ -447,14 +490,31 @@ def load_url(url, tipo):
             gid = url.split("gid=")[1].split("&")[0].split("#")[0] if "gid=" in url else None
             url = (f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv"
                    + (f"&gid={gid}" if gid else ""))
-        r = requests.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0"})
+        sess = requests.Session()
+        sess.trust_env = False
+        auth_hdr = _sa_auth_header()
+        headers = {"User-Agent": "Mozilla/5.0", **auth_hdr}
+        r = sess.get(url, timeout=20, headers=headers, allow_redirects=True)
         if r.status_code == 403:
-            raise Exception("Acesso negado (403). Verifique se a planilha está compartilhada como 'Qualquer pessoa com o link → Leitor'.")
+            if auth_hdr:
+                raise Exception(
+                    "Acesso negado (403) mesmo com Service Account. "
+                    "Verifique se o e-mail da SA tem acesso à planilha como Leitor.")
+            raise Exception(
+                "Acesso negado (403). Configure o Service Account nos secrets do Streamlit "
+                "ou publique a planilha via Arquivo → Publicar na web → CSV.")
+        if r.status_code == 400 or "googleusercontent.com" in r.url:
+            raise Exception(
+                "Erro de autenticação (400). Configure o Service Account nos secrets do Streamlit.")
         if r.status_code == 404:
             raise Exception("Planilha não encontrada (404). Verifique o ID e o GID da aba.")
         r.raise_for_status()
         try:    raw = r.content.decode("utf-8")
         except: raw = r.content.decode("latin-1")
+        if "<html" in raw[:200].lower():
+            raise Exception(
+                "Google retornou HTML em vez de CSV. "
+                "Verifique as permissões ou configure o Service Account.")
         df = parse_csv(raw, tipo)
         return df, datetime.now().strftime("%d/%m/%Y %H:%M")
     except Exception as e:
@@ -635,11 +695,27 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
     ex1, ex2 = st.columns([3, 1])
     with ex1:
         st.markdown("**📋 Planilha Unificada (Google Sheets)**")
+
+        _sa_ok = _get_sa_creds() is not None
+        if _sa_ok:
+            st.markdown(
+                "<div style='font-size:.74rem;padding:8px 12px;margin-bottom:10px;"
+                "background:rgba(16,185,129,.08);border-radius:8px;border:1px solid rgba(16,185,129,.2);color:#34d399;'>"
+                "🔐 <strong>Service Account configurada</strong> — acesso autenticado e seguro. "
+                "A planilha não precisa ser pública.</div>",
+                unsafe_allow_html=True)
+        else:
+            st.markdown(
+                "<div style='font-size:.74rem;padding:8px 12px;margin-bottom:10px;"
+                "background:rgba(245,158,11,.08);border-radius:8px;border:1px solid rgba(245,158,11,.2);color:#fbbf24;'>"
+                "⚠️ <strong>Service Account não configurada.</strong> "
+                "Siga o guia abaixo para acessar planilhas privadas com segurança.</div>",
+                unsafe_allow_html=True)
+
         st.markdown(
             "<div style='font-size:.74rem;color:#64748b;margin-bottom:8px;'>"
             "Cole o link da planilha que contém todas as abas: "
-            "<strong>E-commerce · Marketplace · Metas · Acessos · Campanhas</strong><br>"
-            "O dashboard carrega cada aba automaticamente pelo número da guia (gid).</div>",
+            "<strong>E-commerce · Marketplace · Metas · Acessos · Campanhas</strong></div>",
             unsafe_allow_html=True)
         sheet_url = st.text_input("URL da Planilha Google Sheets", key="sheet_url_in",
                                   placeholder="https://docs.google.com/spreadsheets/d/...")
@@ -653,13 +729,6 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
         gid_met = gcols[2].text_input("Metas",        value="2",   key="gid_met")
         gid_ac  = gcols[3].text_input("Acessos",      value="3",   key="gid_ac")
         gid_ca  = gcols[4].text_input("Campanhas",    value="4",   key="gid_ca")
-
-        st.markdown(
-            "<div style='font-size:.74rem;color:#f59e0b;margin-top:8px;padding:8px 12px;"
-            "background:rgba(245,158,11,.08);border-radius:8px;border:1px solid rgba(245,158,11,.2);'>"
-            "⚠️ <strong>Antes de carregar:</strong> a planilha deve estar compartilhada publicamente. "
-            "No Google Sheets: <em>Arquivo → Compartilhar → Qualquer pessoa com o link → Leitor</em>.</div>",
-            unsafe_allow_html=True)
 
         if st.button("Carregar Planilha", use_container_width=True, key="btn_sheet"):
             url = sheet_url.strip()
@@ -686,7 +755,24 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                         else:
                             log_msgs.append("❌ Marketplace/NF: sem dados (verifique o GID e permissões)")
                     except Exception as e:
-                        log_msgs.append(f"❌ Marketplace/NF: {e}")
+                        err_str = str(e)
+                        if "400" in err_str or "403" in err_str or "googleusercontent" in err_str:
+                            try:
+                                raw_mp, ts_mp_ = load_url(gid_pub_url(sid, gid_nf), "mp")
+                                if raw_mp is not None and not raw_mp.empty:
+                                    st.session_state.df_mp_raw = raw_mp
+                                    st.session_state.ts_mp     = ts_mp_
+                                    st.session_state.sheet_id  = sid
+                                    st.session_state.gid_ac    = gid_ac
+                                    st.session_state.gid_ca    = gid_ca
+                                    log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas (via /pub)")
+                                    ok_mp = True
+                                else:
+                                    log_msgs.append(f"❌ Marketplace/NF: {err_str}")
+                            except Exception as e2:
+                                log_msgs.append(f"❌ Marketplace/NF: {err_str} | Publicar na web também falhou: {str(e2)[:120]}")
+                        else:
+                            log_msgs.append(f"❌ Marketplace/NF: {err_str}")
 
                 with st.spinner("Carregando aba E-commerce..."):
                     try:
@@ -698,7 +784,20 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                         else:
                             log_msgs.append("⚪ E-commerce: não carregado (opcional)")
                     except Exception as e:
-                        log_msgs.append(f"⚪ E-commerce: {e} (opcional)")
+                        err_str = str(e)
+                        if "400" in err_str or "403" in err_str or "googleusercontent" in err_str:
+                            try:
+                                raw_ec, ts_ec_ = load_url(gid_pub_url(sid, gid_ec), "ec")
+                                if raw_ec is not None and not raw_ec.empty:
+                                    st.session_state.df_ec_raw = raw_ec
+                                    st.session_state.ts_ec     = ts_ec_
+                                    log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas (via /pub)")
+                                else:
+                                    log_msgs.append(f"⚪ E-commerce: {err_str} (opcional)")
+                            except Exception:
+                                log_msgs.append(f"⚪ E-commerce: {err_str} (opcional)")
+                        else:
+                            log_msgs.append(f"⚪ E-commerce: {err_str} (opcional)")
 
                 for msg in log_msgs:
                     if msg.startswith("✅"):
@@ -712,12 +811,48 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                     st.rerun()
 
     with ex2:
+        _sa_ok = _get_sa_creds() is not None
         st.markdown("**Status**")
         st.markdown(
             f"{'🟢' if has_mp else '🔴'} Faturamento<br>"
             f"{'🟢' if has_ec else '⚪'} E-commerce<br>"
-            f"{'🟢' if st.session_state.get('sheet_id') else '⚪'} Acessos/Campanhas",
+            f"{'🟢' if st.session_state.get('sheet_id') else '⚪'} Acessos/Campanhas<br>"
+            f"{'🔐' if _sa_ok else '🔓'} Service Account",
             unsafe_allow_html=True)
+        if not _sa_ok:
+            with st.expander("🔐 Como configurar Service Account"):
+                st.markdown("""
+**1. Google Cloud Console**
+- Acesse [console.cloud.google.com](https://console.cloud.google.com)
+- Crie um projeto (ou use um existente)
+- Ative a **Google Sheets API** e a **Google Drive API**
+
+**2. Criar Service Account**
+- IAM e Admin → Contas de serviço → Criar
+- Dê um nome (ex: `dashboard-seculus`)
+- Em **Chaves**, clique Adicionar chave → JSON
+- Baixe o arquivo `.json`
+
+**3. Compartilhar a planilha**
+- No Google Sheets, clique em **Compartilhar**
+- Adicione o e-mail da SA (`...@...iam.gserviceaccount.com`) como **Leitor**
+- A planilha permanece privada
+
+**4. Adicionar ao Streamlit**
+- No Streamlit Cloud: Settings → Secrets
+- Cole o conteúdo abaixo com os dados do JSON:
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "seu-projeto"
+private_key_id = "..."
+private_key = "-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
+client_email = "dashboard@...iam.gserviceaccount.com"
+client_id = "..."
+token_uri = "https://oauth2.googleapis.com/token"
+```
+""")
         if has_mp:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔄 Limpar dados", use_container_width=True):
