@@ -375,13 +375,15 @@ def parse_pct_num(s):
     except Exception:
         return 0.0
 
-@st.cache_data(ttl=300)
-def load_campanhas(url: str) -> pd.DataFrame:
+@st.cache_data(ttl=270)
+def load_campanhas(url: str, token: str = "") -> pd.DataFrame:
     try:
         sess = requests.Session()
         sess.trust_env = False
-        auth_hdr = _sa_auth_header()
-        r = sess.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0", **auth_hdr})
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        r = sess.get(url, timeout=20, headers=headers)
         r.raise_for_status()
         try:    text = r.content.decode("utf-8")
         except: text = r.content.decode("latin-1")
@@ -399,13 +401,15 @@ def load_campanhas(url: str) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def load_acessos(url: str) -> pd.DataFrame:
+@st.cache_data(ttl=270)
+def load_acessos(url: str, token: str = "") -> pd.DataFrame:
     try:
         sess = requests.Session()
         sess.trust_env = False
-        auth_hdr = _sa_auth_header()
-        r = sess.get(url, timeout=20, headers={"User-Agent":"Mozilla/5.0", **auth_hdr})
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        r = sess.get(url, timeout=20, headers=headers)
         r.raise_for_status()
         try:    text = r.content.decode("utf-8")
         except: text = r.content.decode("latin-1")
@@ -458,31 +462,34 @@ for k, v in [("df_mp_raw", None),("df_ec_raw", None),
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly",
           "https://www.googleapis.com/auth/drive.readonly"]
 
-def _get_sa_creds():
-    """Load Service Account credentials from Streamlit secrets. Returns None if not configured."""
+@st.cache_resource
+def _sa_credentials():
+    """Load and cache SA credentials object in memory (not serialized)."""
     if not HAS_GOOGLE_AUTH:
         return None
     try:
         sa_info = dict(st.secrets["gcp_service_account"])
-        creds = service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
-        return creds
+        return service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
     except Exception:
         return None
 
-def _sa_auth_header():
-    """Return Authorization header dict using SA token, or empty dict if unavailable."""
-    creds = _get_sa_creds()
+def _get_sa_token() -> str:
+    """Get a fresh SA bearer token as a plain string. Returns '' if SA not configured."""
+    creds = _sa_credentials()
     if creds is None:
-        return {}
+        return ""
     try:
-        if not creds.valid:
-            creds.refresh(GoogleRequest())
-        return {"Authorization": f"Bearer {creds.token}"}
+        creds.refresh(GoogleRequest())
+        return creds.token or ""
     except Exception:
-        return {}
+        return ""
 
-@st.cache_data(ttl=300)
-def load_url(url, tipo):
+def _sa_configured() -> bool:
+    """Check whether SA secrets are present and loadable."""
+    return _sa_credentials() is not None
+
+@st.cache_data(ttl=270)
+def load_url(url: str, tipo: str, token: str = "") -> tuple:
     try:
         url = url.strip()
         if "docs.google.com" in url:
@@ -492,29 +499,31 @@ def load_url(url, tipo):
                    + (f"&gid={gid}" if gid else ""))
         sess = requests.Session()
         sess.trust_env = False
-        auth_hdr = _sa_auth_header()
-        headers = {"User-Agent": "Mozilla/5.0", **auth_hdr}
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         r = sess.get(url, timeout=20, headers=headers, allow_redirects=True)
         if r.status_code == 403:
-            if auth_hdr:
+            if token:
                 raise Exception(
-                    "Acesso negado (403) mesmo com Service Account. "
-                    "Verifique se o e-mail da SA tem acesso à planilha como Leitor.")
+                    "Acesso negado (403) com Service Account. "
+                    "Verifique se o e-mail da SA foi adicionado como Leitor na planilha.")
             raise Exception(
-                "Acesso negado (403). Configure o Service Account nos secrets do Streamlit "
-                "ou publique a planilha via Arquivo → Publicar na web → CSV.")
+                "Acesso negado (403). Configure o Service Account nos Secrets do Streamlit.")
         if r.status_code == 400 or "googleusercontent.com" in r.url:
+            if token:
+                raise Exception(
+                    "Erro 400 mesmo com Service Account. "
+                    "Verifique se a SA tem acesso à planilha e se os secrets estão corretos.")
             raise Exception(
-                "Erro de autenticação (400). Configure o Service Account nos secrets do Streamlit.")
+                "Erro de autenticação (400). Configure o Service Account nos Secrets do Streamlit.")
         if r.status_code == 404:
             raise Exception("Planilha não encontrada (404). Verifique o ID e o GID da aba.")
         r.raise_for_status()
         try:    raw = r.content.decode("utf-8")
         except: raw = r.content.decode("latin-1")
         if "<html" in raw[:200].lower():
-            raise Exception(
-                "Google retornou HTML em vez de CSV. "
-                "Verifique as permissões ou configure o Service Account.")
+            raise Exception("Google retornou HTML em vez de CSV. Verifique as permissões da SA.")
         df = parse_csv(raw, tipo)
         return df, datetime.now().strftime("%d/%m/%Y %H:%M")
     except Exception as e:
@@ -696,7 +705,7 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
     with ex1:
         st.markdown("**📋 Planilha Unificada (Google Sheets)**")
 
-        _sa_ok = _get_sa_creds() is not None
+        _sa_ok = _sa_configured()
         if _sa_ok:
             st.markdown(
                 "<div style='font-size:.74rem;padding:8px 12px;margin-bottom:10px;"
@@ -737,13 +746,14 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
             elif "/d/" not in url:
                 st.error("URL inválida. Copie o link direto da barra de endereço do Google Sheets.")
             else:
-                sid = url.split("/d/")[1].split("/")[0]
+                sid   = url.split("/d/")[1].split("/")[0]
+                token = _get_sa_token()
                 log_msgs = []
                 ok_mp = False
 
                 with st.spinner("Carregando aba Marketplace/NF..."):
                     try:
-                        raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf), "mp")
+                        raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf), "mp", token)
                         if raw_mp is not None and not raw_mp.empty:
                             st.session_state.df_mp_raw = raw_mp
                             st.session_state.ts_mp     = ts_mp_
@@ -753,51 +763,21 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                             log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas")
                             ok_mp = True
                         else:
-                            log_msgs.append("❌ Marketplace/NF: sem dados (verifique o GID e permissões)")
+                            log_msgs.append("❌ Marketplace/NF: sem dados — verifique o GID")
                     except Exception as e:
-                        err_str = str(e)
-                        if "400" in err_str or "403" in err_str or "googleusercontent" in err_str:
-                            try:
-                                raw_mp, ts_mp_ = load_url(gid_pub_url(sid, gid_nf), "mp")
-                                if raw_mp is not None and not raw_mp.empty:
-                                    st.session_state.df_mp_raw = raw_mp
-                                    st.session_state.ts_mp     = ts_mp_
-                                    st.session_state.sheet_id  = sid
-                                    st.session_state.gid_ac    = gid_ac
-                                    st.session_state.gid_ca    = gid_ca
-                                    log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas (via /pub)")
-                                    ok_mp = True
-                                else:
-                                    log_msgs.append(f"❌ Marketplace/NF: {err_str}")
-                            except Exception as e2:
-                                log_msgs.append(f"❌ Marketplace/NF: {err_str} | Publicar na web também falhou: {str(e2)[:120]}")
-                        else:
-                            log_msgs.append(f"❌ Marketplace/NF: {err_str}")
+                        log_msgs.append(f"❌ Marketplace/NF: {e}")
 
                 with st.spinner("Carregando aba E-commerce..."):
                     try:
-                        raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec), "ec")
+                        raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec), "ec", token)
                         if raw_ec is not None and not raw_ec.empty:
                             st.session_state.df_ec_raw = raw_ec
                             st.session_state.ts_ec     = ts_ec_
                             log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas")
                         else:
-                            log_msgs.append("⚪ E-commerce: não carregado (opcional)")
+                            log_msgs.append("⚪ E-commerce: sem dados (opcional)")
                     except Exception as e:
-                        err_str = str(e)
-                        if "400" in err_str or "403" in err_str or "googleusercontent" in err_str:
-                            try:
-                                raw_ec, ts_ec_ = load_url(gid_pub_url(sid, gid_ec), "ec")
-                                if raw_ec is not None and not raw_ec.empty:
-                                    st.session_state.df_ec_raw = raw_ec
-                                    st.session_state.ts_ec     = ts_ec_
-                                    log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas (via /pub)")
-                                else:
-                                    log_msgs.append(f"⚪ E-commerce: {err_str} (opcional)")
-                            except Exception:
-                                log_msgs.append(f"⚪ E-commerce: {err_str} (opcional)")
-                        else:
-                            log_msgs.append(f"⚪ E-commerce: {err_str} (opcional)")
+                        log_msgs.append(f"⚪ E-commerce: {e} (opcional)")
 
                 for msg in log_msgs:
                     if msg.startswith("✅"):
@@ -811,7 +791,7 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                     st.rerun()
 
     with ex2:
-        _sa_ok = _get_sa_creds() is not None
+        _sa_ok = _sa_configured()
         st.markdown("**Status**")
         st.markdown(
             f"{'🟢' if has_mp else '🔴'} Faturamento<br>"
@@ -1618,7 +1598,8 @@ with tab_prod:
 with tab_acessos:
     _sid   = st.session_state.get("sheet_id","")
     _gac   = st.session_state.get("gid_ac","3")
-    df_ac  = load_acessos(gid_url(_sid, _gac)) if _sid else pd.DataFrame()
+    _tok   = _get_sa_token()
+    df_ac  = load_acessos(gid_url(_sid, _gac), _tok) if _sid else pd.DataFrame()
 
     if df_ac.empty:
         st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de acessos.</div>", unsafe_allow_html=True)
@@ -1700,7 +1681,8 @@ with tab_acessos:
 with tab_camp:
     _sid   = st.session_state.get("sheet_id","")
     _gca   = st.session_state.get("gid_ca","4")
-    df_ca  = load_campanhas(gid_url(_sid, _gca)) if _sid else pd.DataFrame()
+    _tok_c = _get_sa_token()
+    df_ca  = load_campanhas(gid_url(_sid, _gca), _tok_c) if _sid else pd.DataFrame()
 
     if df_ca.empty:
         st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de campanhas.</div>", unsafe_allow_html=True)
