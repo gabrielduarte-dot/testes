@@ -1051,11 +1051,9 @@ mp_mkt_all  = agg_nf(df_mp, "marketplace")
 st.markdown("---")
 hoje = datetime.today().date()
 
-if "d_ini" not in st.session_state: st.session_state.d_ini = hoje.replace(day=1)
-if "d_fim" not in st.session_state: st.session_state.d_fim = hoje
+import calendar as _cal
 
 # Build list of month options (last 24 months)
-import calendar as _cal
 _meses_opts = []
 for _i in range(23, -1, -1):
     _m = (hoje.month - _i - 1) % 12 + 1
@@ -1065,25 +1063,24 @@ _meses_labels = [d.strftime("%b/%Y") for d in _meses_opts]
 _mes_atual_label = hoje.replace(day=1).strftime("%b/%Y")
 _mes_default_idx = _meses_labels.index(_mes_atual_label) if _mes_atual_label in _meses_labels else len(_meses_labels)-1
 
-if "mes_seletor" not in st.session_state: st.session_state.mes_seletor = _mes_default_idx
+if "mes_seletor" not in st.session_state:
+    st.session_state.mes_seletor = _mes_default_idx
 
-fr = st.columns([2, 2, 2, 3])
+fr = st.columns([2, 5])
 with fr[0]:
-    mes_idx = st.selectbox("Mês", range(len(_meses_labels)),
+    mes_idx = st.selectbox("Mês / Ano", range(len(_meses_labels)),
                            format_func=lambda i: _meses_labels[i],
                            index=st.session_state.mes_seletor, key="mes_seletor")
-    _mes_escolhido = _meses_opts[mes_idx]
-    _ultimo_dia = _cal.monthrange(_mes_escolhido.year, _mes_escolhido.month)[1]
-    _fim_mes = date(_mes_escolhido.year, _mes_escolhido.month, _ultimo_dia)
-    _fim_padrao = min(_fim_mes, hoje)
-    if st.session_state.d_ini != _mes_escolhido or st.session_state.d_fim != _fim_padrao:
-        st.session_state.d_ini = _mes_escolhido
-        st.session_state.d_fim = _fim_padrao
-        st.rerun()
-with fr[1]: data_ini = st.date_input("De",  value=st.session_state.d_ini, key="d_ini", format="DD/MM/YYYY")
-with fr[2]: data_fim = st.date_input("Até", value=st.session_state.d_fim, key="d_fim", format="DD/MM/YYYY")
-with fr[3]: comp_modo = st.selectbox("Comparar com",
-    ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"], key="comp")
+with fr[1]:
+    comp_modo = st.selectbox("Comparar com",
+        ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"], key="comp")
+
+_mes_escolhido = _meses_opts[mes_idx]
+_ultimo_dia    = _cal.monthrange(_mes_escolhido.year, _mes_escolhido.month)[1]
+data_ini = _mes_escolhido
+data_fim = date(_mes_escolhido.year, _mes_escolhido.month, _ultimo_dia)
+
+ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
 
 ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
 
