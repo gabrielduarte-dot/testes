@@ -785,11 +785,16 @@ def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
 
     # Date — try created_at first, then creation
     date_col = "created_at" if "created_at" in df.columns else "creation"
-    df["data"] = pd.to_datetime(df[date_col].astype(str).str.strip(),
-                                errors="coerce", dayfirst=True, utc=False)
-    if df["data"].dt.tz is not None:
-        df["data"] = df["data"].dt.tz_localize(None)
-    df["data"] = df["data"].dt.normalize()
+    _raw_dates = df[date_col].astype(str).str.strip()
+    # Try ISO format with UTC first (old format: 2026-04-01 10:00:00Z)
+    _parsed = pd.to_datetime(_raw_dates, errors="coerce", utc=True)
+    if _parsed.isna().mean() > 0.5:
+        # Fallback to BR dayfirst format (new format: 30/01/2026)
+        _parsed = pd.to_datetime(_raw_dates, errors="coerce", dayfirst=True)
+    # Remove timezone info if present
+    if _parsed.dt.tz is not None:
+        _parsed = _parsed.dt.tz_localize(None)
+    df["data"] = _parsed.dt.normalize()
 
     df["status"]    = df["status"].astype(str).str.strip()
     df["faturado"]  = df["status"].str.lower().isin(
