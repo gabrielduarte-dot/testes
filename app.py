@@ -1036,11 +1036,6 @@ df_ec = pd.DataFrame()
 if has_ec:
     try:
         df_ec = prep_ec(st.session_state.df_ec_raw)
-        if df_ec.empty:
-            st.warning("⚠️ EC processado mas vazio após prep_ec.")
-        else:
-            with st.expander(f"🔍 Debug EC: {len(df_ec)} linhas, datas: {df_ec['data'].min()} → {df_ec['data'].max()}", expanded=False):
-                st.dataframe(df_ec[["order","data","status","payment_method","brand"]].head(5))
     except Exception as e:
         st.warning(f"Erro ao processar planilha EC: {e}")
 
@@ -1464,7 +1459,11 @@ with tab_ec_tab:
     if has_ec:
         sh("Status dos Pedidos (Planilha E-commerce)")
         if ec_p_ec.empty:
-            st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado para o período selecionado na planilha E-commerce.</div>", unsafe_allow_html=True)
+            _ec_min = df_ec["data"].min().strftime("%d/%m/%Y") if not df_ec.empty else "—"
+            _ec_max = df_ec["data"].max().strftime("%d/%m/%Y") if not df_ec.empty else "—"
+            st.markdown(f"<div class='warn'>⚠️ Nenhum pedido EC no período selecionado. "
+                        f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>. "
+                        f"Ajuste o seletor de mês.</div>", unsafe_allow_html=True)
         else:
             ec_dedup = ec_p_ec.drop_duplicates("order")
             ec_fat_dedup = ec_dedup[ec_dedup["faturado"]].copy()
