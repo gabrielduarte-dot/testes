@@ -248,9 +248,28 @@ def _ec_colnames(text: str) -> list:
     first = text.split("\n")[0]
     import csv as _csv
     ncols = len(list(_csv.reader([first]))[0])
-    if ncols >= 19: return EC_COLS_19
-    if ncols == 18: return EC_COLS_18
-    if ncols == 17: return EC_COLS_17
+    # Sniff col 6 and 7 to detect whether marketingtags column is present
+    # With marketingtags: col6=tag, col7=payment → col7 is payment
+    # Without marketingtags: col6=payment, col7=installments (numeric)
+    try:
+        rows = list(_csv.reader(text.split("\n")[:3]))
+        data_row = rows[0]
+        col6 = str(data_row[6]).strip().lower() if len(data_row) > 6 else ""
+        col7 = str(data_row[7]).strip().lower() if len(data_row) > 7 else ""
+        payment_kws = ["pix","credit","debit","boleto","card","cartao","cartão","mastercard","visa","elo","hipercard"]
+        col6_is_payment = any(p in col6 for p in payment_kws)
+        col7_is_payment = any(p in col7 for p in payment_kws)
+        # If col6 is payment (not col7), marketingtags column is absent
+        no_mktags = col6_is_payment and not col7_is_payment
+    except Exception:
+        no_mktags = False
+
+    if ncols >= 19:
+        return EC_COLS_18F if no_mktags else EC_COLS_19
+    if ncols == 18:
+        return EC_COLS_18F if no_mktags else EC_COLS_18
+    if ncols == 17:
+        return EC_COLS_17
     return EC_COLS_17
 
 _BL = dict(
