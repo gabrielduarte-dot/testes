@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from io import StringIO
 import requests
+import re
 from datetime import datetime, timedelta, date
 import numpy as np
 import json
@@ -1471,21 +1472,17 @@ with tab_ec_tab:
         sh("Status dos Pedidos (Planilha E-commerce)")
         if df_ec.empty:
             st.markdown("<div class='warn'>⚠️ Planilha E-commerce carregada mas sem dados processados.</div>", unsafe_allow_html=True)
+        elif ec_p_ec.empty:
+            _ec_min = df_ec["data"].min().strftime("%d/%m/%Y")
+            _ec_max = df_ec["data"].max().strftime("%d/%m/%Y")
+            st.markdown(f"<div class='warn'>⚠️ Sem pedidos EC no período selecionado. "
+                        f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>.</div>",
+                        unsafe_allow_html=True)
         else:
-            _src = ec_p_ec if not ec_p_ec.empty else df_ec
-            _periodo_label = f"{data_ini.strftime('%d/%m/%Y')} → {data_fim.strftime('%d/%m/%Y')}"
-            if ec_p_ec.empty:
-                _ec_min = df_ec["data"].min().strftime("%d/%m/%Y")
-                _ec_max = df_ec["data"].max().strftime("%d/%m/%Y")
-                st.markdown(f"<div class='warn'>⚠️ Sem pedidos EC no período selecionado. "
-                            f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>. "
-                            f"Exibindo análise geral abaixo.</div>", unsafe_allow_html=True)
-                _periodo_label = f"{_ec_min} → {_ec_max}"
-
-            ec_dedup     = _src.drop_duplicates("order")
+            ec_dedup     = ec_p_ec.drop_duplicates("order")
             ec_fat_dedup = ec_dedup[ec_dedup["faturado"]].copy()
-            n_fat_ec  = len(ec_fat_dedup)
-            n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
+            n_fat_ec     = len(ec_fat_dedup)
+            n_canc_ec    = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
 
             # ── Faturado vs Cancelado
             st_rows = []
@@ -1495,7 +1492,6 @@ with tab_ec_tab:
 
             c1, c2, c3 = st.columns(3)
 
-            # Col 1 — Faturado vs Cancelado
             with c1:
                 sh("Faturado vs Cancelado")
                 if not st_cnt.empty:
@@ -1507,14 +1503,13 @@ with tab_ec_tab:
                     fig_st.update_layout(**L(margin=dict(l=10,r=10,t=20,b=10)))
                     st.plotly_chart(fig_st, use_container_width=True)
 
-            # Col 2 — Pix vs Cartão (faturados)
             with c2:
                 sh("Forma de Pagamento — Faturados")
                 if not ec_fat_dedup.empty and "payment_method" in ec_fat_dedup.columns:
                     def _pmt_group(p):
                         p = str(p).strip().lower()
                         if "pix" in p: return "Pix"
-                        if "credit" in p or "cartão" in p or "card" in p or "crédito" in p: return "Cartão de Crédito"
+                        if any(x in p for x in ["credit","cartão","card","crédito","mastercard","visa","elo","amex","american","hipercard"]): return "Cartão de Crédito"
                         return p.title()
                     ec_fat_dedup = ec_fat_dedup.copy()
                     ec_fat_dedup["pmt_group"] = ec_fat_dedup["payment_method"].apply(_pmt_group)
@@ -1529,14 +1524,10 @@ with tab_ec_tab:
                     fig_pmt.update_layout(**L(margin=dict(l=10,r=10,t=20,b=10)))
                     st.plotly_chart(fig_pmt, use_container_width=True)
 
-            # Col 3 — Média de parcelamentos
             with c3:
                 sh("Parcelamentos — Cartão")
                 if not ec_fat_dedup.empty and "installments" in ec_fat_dedup.columns:
-                    ec_fat_dedup["inst_num"] = pd.to_numeric(
-                        ec_fat_dedup["installments"], errors="coerce")
-                    cartao = ec_fat_dedup[ec_fat_dedup["inst_num"] > 1] if "pmt_group" in ec_fat_dedup.columns \
-                             else ec_fat_dedup[ec_fat_dedup["inst_num"] > 1]
+                    ec_fat_dedup["inst_num"] = pd.to_numeric(ec_fat_dedup["installments"], errors="coerce")
                     media_parc = ec_fat_dedup["inst_num"].dropna().mean()
                     dist_parc  = (ec_fat_dedup["inst_num"].dropna()
                                   .value_counts().sort_index().reset_index()
@@ -1551,69 +1542,60 @@ with tab_ec_tab:
                                                    xaxis=dict(tickmode="linear", dtick=1)))
                         st.plotly_chart(fig_parc, use_container_width=True)
 
-        # ── Cupons mais usados
-        sh("Cupons Mais Utilizados")
-        if "marketingtags" in ec_fat_dedup.columns:
-            _cupons = (ec_fat_dedup["marketingtags"]
-                       .fillna("").astype(str).str.strip()
-                       .replace("", pd.NA).dropna())
-            if not _cupons.empty:
-                cup_agg = (_cupons.value_counts()
-                           .reset_index()
-                           .rename(columns={"marketingtags":"Cupom","count":"Pedidos"})
-                           .head(15))
-                cup_total = int(cup_agg["Pedidos"].sum())
-                cup_agg["Share"] = (cup_agg["Pedidos"] / ec_fat_dedup["order"].nunique() * 100).round(1).astype(str) + "%"
-                st.markdown(f"<div class='info'>🏷️ <strong>{len(cup_agg)}</strong> cupons distintos · "
-                            f"<strong>{cup_total}</strong> pedidos com cupom de <strong>{ec_fat_dedup['order'].nunique()}</strong> faturados</div>",
-                            unsafe_allow_html=True)
-                fig_cup = px.bar(cup_agg, x="Pedidos", y="Cupom", orientation="h",
-                                 text="Pedidos",
-                                 labels={"Cupom":"","Pedidos":"Pedidos Faturados"})
-                fig_cup.update_traces(marker_color="#3b6fff", textposition="outside")
-                fig_cup.update_layout(**Li(height=max(260, len(cup_agg)*34)))
-                st.plotly_chart(fig_cup, use_container_width=True)
-            else:
-                st.markdown("<div class='info'>ℹ️ Nenhum cupom registrado nos pedidos faturados.</div>", unsafe_allow_html=True)
+            # ── Cupons mais usados
+            sh("Cupons Mais Utilizados")
+            if "marketingtags" in ec_fat_dedup.columns:
+                _cupons = (ec_fat_dedup["marketingtags"]
+                           .fillna("").astype(str).str.strip()
+                           .replace("", pd.NA).dropna())
+                if not _cupons.empty:
+                    cup_agg = (_cupons.value_counts()
+                               .reset_index()
+                               .rename(columns={"marketingtags":"Cupom","count":"Pedidos"})
+                               .head(15))
+                    cup_total = int(cup_agg["Pedidos"].sum())
+                    st.markdown(f"<div class='info'>🏷️ <strong>{len(cup_agg)}</strong> cupons distintos · "
+                                f"<strong>{cup_total}</strong> pedidos com cupom de <strong>{n_fat_ec}</strong> faturados</div>",
+                                unsafe_allow_html=True)
+                    fig_cup = px.bar(cup_agg, x="Pedidos", y="Cupom", orientation="h",
+                                     text="Pedidos", labels={"Cupom":"","Pedidos":"Pedidos Faturados"})
+                    fig_cup.update_traces(marker_color="#3b6fff", textposition="outside")
+                    fig_cup.update_layout(**Li(height=max(260, len(cup_agg)*34)))
+                    st.plotly_chart(fig_cup, use_container_width=True)
+                else:
+                    st.markdown("<div class='info'>ℹ️ Nenhum cupom no período.</div>", unsafe_allow_html=True)
 
-        # ── Campanhas que geraram pedidos faturados
-        sh("Campanhas com Pedidos Faturados")
-        if has_ec and not df_ec.empty:
-            _fat_camp = df_ec[df_ec["faturado"]].drop_duplicates("order").copy()
+            # ── Campanhas que geraram pedidos faturados
+            sh("Campanhas com Pedidos Faturados")
+            _fat_camp = ec_fat_dedup.copy()
             if "discount_tags" in _fat_camp.columns and "brand" in _fat_camp.columns:
                 _fat_camp["discount_tags"] = _fat_camp["discount_tags"].fillna("").astype(str).str.strip()
                 _fat_camp = _fat_camp[_fat_camp["discount_tags"] != ""]
                 if not _fat_camp.empty:
-                    # Normalize combo: sort individual parts alphabetically so
-                    # "Pix 5%, Frete Grátis" == "Frete Grátis, Pix 5%"
                     def _norm_combo(s):
-                        parts = [p.strip() for p in s.split(r", ") if p.strip()]
+                        parts = [p.strip() for p in re.split(r",\s+", s) if p.strip()]
                         return " + ".join(sorted(parts))
+                    _fat_camp = _fat_camp.copy()
                     _fat_camp["combo"] = _fat_camp["discount_tags"].apply(_norm_combo)
                     camp_agg = (_fat_camp.groupby(["combo","brand"])
                                 .agg(pedidos=("order","nunique")).reset_index()
-                                .sort_values("pedidos", ascending=False)
-                                .head(25))
-                    camp_agg = camp_agg.rename(columns={"combo":"Combo de Campanhas","brand":"Marca","pedidos":"Pedidos"})
-                    total_camp = camp_agg["Pedidos"].sum()
+                                .sort_values("pedidos", ascending=False).head(25))
+                    camp_agg = camp_agg.rename(columns={"combo":"Combo","brand":"Marca","pedidos":"Pedidos"})
                     st.markdown(f"<div class='info'>📊 <strong>{len(camp_agg)}</strong> combos · "
-                                f"<strong>{total_camp}</strong> pedidos faturados com desconto</div>",
+                                f"<strong>{camp_agg['Pedidos'].sum()}</strong> pedidos com desconto</div>",
                                 unsafe_allow_html=True)
                     seller_colors = {s: list(COR_MARCA.values())[i % len(COR_MARCA)]
                                      for i, s in enumerate(camp_agg["Marca"].unique())}
-                    fig_camp = px.bar(camp_agg, x="Pedidos", y="Combo de Campanhas", orientation="h",
-                                      color="Marca", color_discrete_map=seller_colors,
-                                      text="Pedidos",
-                                      labels={"Combo de Campanhas":"","Pedidos":"Pedidos Faturados","Marca":"Marca"})
+                    fig_camp = px.bar(camp_agg, x="Pedidos", y="Combo", orientation="h",
+                                      color="Marca", color_discrete_map=seller_colors, text="Pedidos",
+                                      labels={"Combo":"","Pedidos":"Pedidos Faturados","Marca":"Marca"})
                     fig_camp.update_traces(textposition="outside")
                     fig_camp.update_layout(**Li(height=max(320, len(camp_agg)*36)))
                     st.plotly_chart(fig_camp, use_container_width=True)
                 else:
-                    st.markdown("<div class='info'>ℹ️ Nenhum pedido faturado com campanha.</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='info'>ℹ️ Nenhum pedido com campanha no período.</div>", unsafe_allow_html=True)
             else:
-                st.markdown("<div class='info'>ℹ️ Coluna <code>discount_tags</code> não encontrada na planilha EC.</div>", unsafe_allow_html=True)
-        elif has_ec:
-            st.markdown("<div class='info'>ℹ️ Planilha EC carregada mas sem dados processados.</div>", unsafe_allow_html=True)
+                st.markdown("<div class='info'>ℹ️ Coluna <code>discount_tags</code> não encontrada.</div>", unsafe_allow_html=True)
 
         sh("Detalhamento de Pedidos")
         _det_src = ec_p_ec if not ec_p_ec.empty else df_ec
