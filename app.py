@@ -1391,44 +1391,115 @@ with tab_ec_tab:
             st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado para o período selecionado na planilha E-commerce.</div>", unsafe_allow_html=True)
         else:
             ec_dedup = ec_p_ec.drop_duplicates("order")
-            n_fat_ec  = int(ec_dedup["faturado"].sum())
+            ec_fat_dedup = ec_dedup[ec_dedup["faturado"]].copy()
+            n_fat_ec  = len(ec_fat_dedup)
             n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
+
+            # ── Faturado vs Cancelado
             st_rows = []
             if n_fat_ec  > 0: st_rows.append({"status":"Faturado",  "qtd":n_fat_ec})
             if n_canc_ec > 0: st_rows.append({"status":"Cancelado", "qtd":n_canc_ec})
             st_cnt = pd.DataFrame(st_rows) if st_rows else pd.DataFrame(columns=["status","qtd"])
-            sv1, sv2 = st.columns(2)
-            with sv1:
+
+            c1, c2, c3 = st.columns(3)
+
+            # Col 1 — Faturado vs Cancelado
+            with c1:
+                sh("Faturado vs Cancelado")
                 if not st_cnt.empty:
                     fig_st = px.pie(st_cnt, names="status", values="qtd",
                                     color="status",
                                     color_discrete_map={"Faturado":"#10b981","Cancelado":"#f43f5e"},
                                     hole=0.58)
                     fig_st.update_traces(textinfo="percent+label", textfont_size=11)
-                    fig_st.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
+                    fig_st.update_layout(**L(margin=dict(l=10,r=10,t=20,b=10)))
                     st.plotly_chart(fig_st, use_container_width=True)
-            with sv2:
-                sh("UTM Source — Pedidos Faturados")
-                if not ec_fat.empty:
-                    utm_t = (ec_fat.drop_duplicates("order")
-                             .groupby("utmsource").agg(pedidos=("order","count")).reset_index()
-                             .sort_values("pedidos", ascending=False)
-                             .head(10))
-                    utm_t["pct"] = (utm_t["pedidos"]/utm_t["pedidos"].sum()*100).map("{:.1f}%".format)
-                    st.dataframe(
-                        utm_t.rename(columns={"utmsource":"UTM Source","pedidos":"Pedidos Fat.","pct":"Share"}),
-                        use_container_width=True, hide_index=True)
+
+            # Col 2 — Pix vs Cartão (faturados)
+            with c2:
+                sh("Forma de Pagamento — Faturados")
+                if not ec_fat_dedup.empty and "payment_method" in ec_fat_dedup.columns:
+                    def _pmt_group(p):
+                        p = str(p).strip().lower()
+                        if "pix" in p: return "Pix"
+                        if "credit" in p or "cartão" in p or "card" in p or "crédito" in p: return "Cartão de Crédito"
+                        return p.title()
+                    ec_fat_dedup = ec_fat_dedup.copy()
+                    ec_fat_dedup["pmt_group"] = ec_fat_dedup["payment_method"].apply(_pmt_group)
+                    pmt_agg = (ec_fat_dedup.groupby("pmt_group")
+                               .agg(pedidos=("order","count")).reset_index()
+                               .sort_values("pedidos", ascending=False))
+                    fig_pmt = px.pie(pmt_agg, names="pmt_group", values="pedidos",
+                                     color="pmt_group",
+                                     color_discrete_map={"Pix":"#10b981","Cartão de Crédito":"#3b6fff"},
+                                     hole=0.58)
+                    fig_pmt.update_traces(textinfo="percent+label", textfont_size=11)
+                    fig_pmt.update_layout(**L(margin=dict(l=10,r=10,t=20,b=10)))
+                    st.plotly_chart(fig_pmt, use_container_width=True)
+
+            # Col 3 — Média de parcelamentos
+            with c3:
+                sh("Parcelamentos — Cartão")
+                if not ec_fat_dedup.empty and "installments" in ec_fat_dedup.columns:
+                    ec_fat_dedup["inst_num"] = pd.to_numeric(
+                        ec_fat_dedup["installments"], errors="coerce")
+                    cartao = ec_fat_dedup[ec_fat_dedup["inst_num"] > 1] if "pmt_group" in ec_fat_dedup.columns \
+                             else ec_fat_dedup[ec_fat_dedup["inst_num"] > 1]
+                    media_parc = ec_fat_dedup["inst_num"].dropna().mean()
+                    dist_parc  = (ec_fat_dedup["inst_num"].dropna()
+                                  .value_counts().sort_index().reset_index()
+                                  .rename(columns={"inst_num":"Parcelas","count":"Pedidos"}))
+                    st.metric("Média de Parcelas", f"{media_parc:.1f}x" if not pd.isna(media_parc) else "—")
+                    if not dist_parc.empty:
+                        fig_parc = px.bar(dist_parc, x="Parcelas", y="Pedidos",
+                                          labels={"Parcelas":"Nº de Parcelas","Pedidos":"Pedidos"},
+                                          text="Pedidos")
+                        fig_parc.update_traces(marker_color="#3b6fff", textposition="outside")
+                        fig_parc.update_layout(**L(margin=dict(l=10,r=10,t=20,b=10),
+                                                   xaxis=dict(tickmode="linear", dtick=1)))
+                        st.plotly_chart(fig_parc, use_container_width=True)
+
+        # ── Campanhas que geraram pedidos faturados
+        sh("Campanhas com Pedidos Faturados")
+        if has_ec and not ec_p_ec.empty:
+            _fat_camp = ec_p_ec[ec_p_ec["faturado"]].drop_duplicates("order").copy()
+            if "discount_tags" in _fat_camp.columns and "brand" in _fat_camp.columns:
+                _fat_camp["discount_tags"] = _fat_camp["discount_tags"].fillna("").astype(str)
+                _fat_camp = _fat_camp[_fat_camp["discount_tags"].str.strip() != ""]
+                if not _fat_camp.empty:
+                    # Explode multiple campaigns per order
+                    _fat_camp["camp_list"] = _fat_camp["discount_tags"].str.split(",")
+                    _exp = _fat_camp.explode("camp_list").copy()
+                    _exp["camp_list"] = _exp["camp_list"].str.strip()
+                    _exp = _exp[_exp["camp_list"] != ""]
+                    camp_agg = (_exp.groupby(["camp_list","brand"])
+                                .agg(pedidos=("order","nunique")).reset_index()
+                                .sort_values("pedidos", ascending=False)
+                                .head(20))
+                    camp_agg = camp_agg.rename(columns={"camp_list":"Campanha","brand":"Seller","pedidos":"Pedidos"})
+                    seller_colors = {s: list(COR_MARCA.values())[i % len(COR_MARCA)]
+                                     for i, s in enumerate(camp_agg["Seller"].unique())}
+                    fig_camp = px.bar(camp_agg, x="Pedidos", y="Campanha", orientation="h",
+                                      color="Seller", color_discrete_map=seller_colors,
+                                      text="Pedidos",
+                                      labels={"Campanha":"","Pedidos":"Pedidos Faturados","Seller":"Marca"})
+                    fig_camp.update_traces(textposition="outside")
+                    fig_camp.update_layout(**Li(height=max(300, len(camp_agg)*32)))
+                    st.plotly_chart(fig_camp, use_container_width=True)
                 else:
-                    st.markdown("<div class='warn'>⚠️ Nenhum pedido faturado no período.</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='info'>ℹ️ Nenhum pedido faturado com campanha no período.</div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div class='info'>ℹ️ Colunas <code>discount_tags</code> ou <code>brand</code> não encontradas na planilha EC.</div>", unsafe_allow_html=True)
 
         sh("Detalhamento de Pedidos")
         if ec_p_ec.empty:
             st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado para o período selecionado.</div>", unsafe_allow_html=True)
         else:
             det = (ec_p_ec.drop_duplicates("order")
-                   [["order","data","status","utmsource","quantity_sku"]]
+                   [["order","data","status","payment_method","installments","quantity_sku"]]
                    .rename(columns={"order":"Order ID","data":"Data","status":"Status",
-                                    "utmsource":"UTM Source","quantity_sku":"Itens"})
+                                    "payment_method":"Pagamento","installments":"Parcelas",
+                                    "quantity_sku":"Itens"})
                    .sort_values("Data", ascending=False))
             st.dataframe(det, use_container_width=True, hide_index=True)
             st.download_button("📥 Exportar pedidos",
@@ -1438,7 +1509,7 @@ with tab_ec_tab:
         sh("Status dos Pedidos (Planilha E-commerce)")
         st.markdown(
             "<div class='info'>ℹ️ Carregue a <strong>planilha E-commerce</strong> no painel "
-            "⚙️ Fontes de Dados para visualizar status de pedidos, UTM Source e detalhamento.</div>",
+            "⚙️ Fontes de Dados para visualizar status de pedidos e detalhamento.</div>",
             unsafe_allow_html=True)
 
     sh("Notas Fiscais E-commerce")
