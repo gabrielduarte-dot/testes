@@ -1036,6 +1036,11 @@ df_ec = pd.DataFrame()
 if has_ec:
     try:
         df_ec = prep_ec(st.session_state.df_ec_raw)
+        if df_ec.empty:
+            st.warning("⚠️ EC processado mas vazio após prep_ec.")
+        else:
+            with st.expander(f"🔍 Debug EC: {len(df_ec)} linhas, datas: {df_ec['data'].min()} → {df_ec['data'].max()}", expanded=False):
+                st.dataframe(df_ec[["order","data","status","payment_method","brand"]].head(5))
     except Exception as e:
         st.warning(f"Erro ao processar planilha EC: {e}")
 
