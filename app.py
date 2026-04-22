@@ -1458,17 +1458,24 @@ with tab_ec_tab:
 
     if has_ec:
         sh("Status dos Pedidos (Planilha E-commerce)")
-        if ec_p_ec.empty:
-            _ec_min = df_ec["data"].min().strftime("%d/%m/%Y") if not df_ec.empty else "—"
-            _ec_max = df_ec["data"].max().strftime("%d/%m/%Y") if not df_ec.empty else "—"
-            st.markdown(f"<div class='warn'>⚠️ Nenhum pedido EC no período selecionado. "
-                        f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>. "
-                        f"Ajuste o seletor de mês.</div>", unsafe_allow_html=True)
+        if df_ec.empty:
+            st.markdown("<div class='warn'>⚠️ Planilha E-commerce carregada mas sem dados processados.</div>", unsafe_allow_html=True)
         else:
-            ec_dedup = ec_p_ec.drop_duplicates("order")
-            ec_fat_dedup = ec_dedup[ec_dedup["faturado"]].copy()
-            n_fat_ec  = len(ec_fat_dedup)
+            # Use full df_ec (all time) for payment/installments analysis
+            # Use ec_p_ec (filtered by period) for period-specific counts
+            ec_dedup     = (ec_p_ec if not ec_p_ec.empty else df_ec).drop_duplicates("order")
+            ec_fat_dedup = df_ec[df_ec["faturado"]].drop_duplicates("order").copy()
+            ec_fat_period = ec_p_ec[ec_p_ec["faturado"]].drop_duplicates("order") if not ec_p_ec.empty else ec_fat_dedup
+            n_fat_ec  = len(ec_fat_period)
             n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
+            n_total   = len(ec_dedup)
+
+            if ec_p_ec.empty:
+                _ec_min = df_ec["data"].min().strftime("%d/%m/%Y")
+                _ec_max = df_ec["data"].max().strftime("%d/%m/%Y")
+                st.markdown(f"<div class='warn'>⚠️ Sem pedidos EC no período selecionado. "
+                            f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>. "
+                            f"Exibindo análise geral abaixo.</div>", unsafe_allow_html=True)
 
             # ── Faturado vs Cancelado
             st_rows = []
@@ -1536,22 +1543,26 @@ with tab_ec_tab:
 
         # ── Campanhas que geraram pedidos faturados
         sh("Campanhas com Pedidos Faturados")
-        if has_ec and not ec_p_ec.empty:
-            _fat_camp = ec_p_ec[ec_p_ec["faturado"]].drop_duplicates("order").copy()
+        if has_ec and not df_ec.empty:
+            _fat_camp = df_ec[df_ec["faturado"]].drop_duplicates("order").copy()
             if "discount_tags" in _fat_camp.columns and "brand" in _fat_camp.columns:
                 _fat_camp["discount_tags"] = _fat_camp["discount_tags"].fillna("").astype(str)
                 _fat_camp = _fat_camp[_fat_camp["discount_tags"].str.strip() != ""]
                 if not _fat_camp.empty:
-                    # Explode multiple campaigns per order
-                    _fat_camp["camp_list"] = _fat_camp["discount_tags"].str.split(",")
+                    # Split by ", " to avoid breaking names with commas (e.g. "R$ 299,00")
+                    _fat_camp["camp_list"] = _fat_camp["discount_tags"].str.split(r",\s+")
                     _exp = _fat_camp.explode("camp_list").copy()
                     _exp["camp_list"] = _exp["camp_list"].str.strip()
-                    _exp = _exp[_exp["camp_list"] != ""]
+                    _exp = _exp[_exp["camp_list"].str.len() > 2]
                     camp_agg = (_exp.groupby(["camp_list","brand"])
                                 .agg(pedidos=("order","nunique")).reset_index()
                                 .sort_values("pedidos", ascending=False)
                                 .head(20))
                     camp_agg = camp_agg.rename(columns={"camp_list":"Campanha","brand":"Seller","pedidos":"Pedidos"})
+                    total_camp = camp_agg["Pedidos"].sum()
+                    st.markdown(f"<div class='info'>📊 <strong>{len(camp_agg)}</strong> campanhas · "
+                                f"<strong>{total_camp}</strong> pedidos faturados com desconto</div>",
+                                unsafe_allow_html=True)
                     seller_colors = {s: list(COR_MARCA.values())[i % len(COR_MARCA)]
                                      for i, s in enumerate(camp_agg["Seller"].unique())}
                     fig_camp = px.bar(camp_agg, x="Pedidos", y="Campanha", orientation="h",
@@ -1559,12 +1570,14 @@ with tab_ec_tab:
                                       text="Pedidos",
                                       labels={"Campanha":"","Pedidos":"Pedidos Faturados","Seller":"Marca"})
                     fig_camp.update_traces(textposition="outside")
-                    fig_camp.update_layout(**Li(height=max(300, len(camp_agg)*32)))
+                    fig_camp.update_layout(**Li(height=max(300, len(camp_agg)*34)))
                     st.plotly_chart(fig_camp, use_container_width=True)
                 else:
-                    st.markdown("<div class='info'>ℹ️ Nenhum pedido faturado com campanha no período.</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='info'>ℹ️ Nenhum pedido faturado com campanha.</div>", unsafe_allow_html=True)
             else:
-                st.markdown("<div class='info'>ℹ️ Colunas <code>discount_tags</code> ou <code>brand</code> não encontradas na planilha EC.</div>", unsafe_allow_html=True)
+                st.markdown("<div class='info'>ℹ️ Coluna <code>discount_tags</code> não encontrada na planilha EC.</div>", unsafe_allow_html=True)
+        elif has_ec:
+            st.markdown("<div class='info'>ℹ️ Planilha EC carregada mas sem dados processados.</div>", unsafe_allow_html=True)
 
         sh("Detalhamento de Pedidos")
         if ec_p_ec.empty:
