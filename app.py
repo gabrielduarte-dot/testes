@@ -1441,20 +1441,22 @@ with tab_ec_tab:
         st.plotly_chart(fig_edd, use_container_width=True)
 
         sh("Atual vs Período Anterior por Marca")
-        ec_a2 = ec_p.groupby("marca")["receita"].sum().reset_index().rename(columns={"receita":"atual"})
-        ec_b2 = (ec_pa.groupby("marca")["receita"].sum().reset_index().rename(columns={"receita":"anterior"})
-                 if not ec_pa.empty else pd.DataFrame(columns=["marca","anterior"]))
-        ec_cmp = ec_a2.merge(ec_b2, on="marca", how="outer").fillna(0)
-        ec_cmp["var"] = ec_cmp.apply(lambda r: fv(vp(r["atual"],r["anterior"])) or "—", axis=1)
-        fig_ecmp = go.Figure([
-            go.Bar(name="Anterior", x=ec_cmp["marca"], y=ec_cmp["anterior"],
-                   marker_color="rgba(100,116,139,.35)", marker_line_width=0),
-            go.Bar(name="Atual",    x=ec_cmp["marca"], y=ec_cmp["atual"],
-                   marker_color=[COR_MARCA.get(m,"#3b6fff") for m in ec_cmp["marca"]],
-                   marker_line_width=0, text=ec_cmp["var"], textposition="outside"),
-        ])
-        fig_ecmp.update_layout(barmode="group", **L())
-        st.plotly_chart(fig_ecmp, use_container_width=True)
+        if not ec_p.empty:
+            ec_a2 = ec_p.groupby("marca")["receita"].sum().reset_index().rename(columns={"receita":"atual"})
+            ec_b2 = (ec_pa.groupby("marca")["receita"].sum().reset_index().rename(columns={"receita":"anterior"})
+                     if not ec_pa.empty else pd.DataFrame(columns=["marca","anterior"]))
+            ec_cmp = ec_a2.merge(ec_b2, on="marca", how="outer").fillna(0)
+            ec_cmp["var"] = ec_cmp.apply(
+                lambda r: fv(vp(r["atual"],r["anterior"])) if r["anterior"] > 0 else "", axis=1)
+            fig_ecmp = go.Figure([
+                go.Bar(name="Anterior", x=ec_cmp["marca"], y=ec_cmp["anterior"],
+                       marker_color="rgba(100,116,139,.35)", marker_line_width=0),
+                go.Bar(name="Atual",    x=ec_cmp["marca"], y=ec_cmp["atual"],
+                       marker_color=[COR_MARCA.get(m,"#3b6fff") for m in ec_cmp["marca"]],
+                       marker_line_width=0, text=ec_cmp["var"], textposition="outside"),
+            ])
+            fig_ecmp.update_layout(barmode="group", **L())
+            st.plotly_chart(fig_ecmp, use_container_width=True)
 
     if has_ec:
         sh("Status dos Pedidos (Planilha E-commerce)")
@@ -1546,31 +1548,32 @@ with tab_ec_tab:
         if has_ec and not df_ec.empty:
             _fat_camp = df_ec[df_ec["faturado"]].drop_duplicates("order").copy()
             if "discount_tags" in _fat_camp.columns and "brand" in _fat_camp.columns:
-                _fat_camp["discount_tags"] = _fat_camp["discount_tags"].fillna("").astype(str)
-                _fat_camp = _fat_camp[_fat_camp["discount_tags"].str.strip() != ""]
+                _fat_camp["discount_tags"] = _fat_camp["discount_tags"].fillna("").astype(str).str.strip()
+                _fat_camp = _fat_camp[_fat_camp["discount_tags"] != ""]
                 if not _fat_camp.empty:
-                    # Split by ", " to avoid breaking names with commas (e.g. "R$ 299,00")
-                    _fat_camp["camp_list"] = _fat_camp["discount_tags"].str.split(r",\s+")
-                    _exp = _fat_camp.explode("camp_list").copy()
-                    _exp["camp_list"] = _exp["camp_list"].str.strip()
-                    _exp = _exp[_exp["camp_list"].str.len() > 2]
-                    camp_agg = (_exp.groupby(["camp_list","brand"])
+                    # Normalize combo: sort individual parts alphabetically so
+                    # "Pix 5%, Frete Grátis" == "Frete Grátis, Pix 5%"
+                    def _norm_combo(s):
+                        parts = [p.strip() for p in s.split(r", ") if p.strip()]
+                        return " + ".join(sorted(parts))
+                    _fat_camp["combo"] = _fat_camp["discount_tags"].apply(_norm_combo)
+                    camp_agg = (_fat_camp.groupby(["combo","brand"])
                                 .agg(pedidos=("order","nunique")).reset_index()
                                 .sort_values("pedidos", ascending=False)
-                                .head(20))
-                    camp_agg = camp_agg.rename(columns={"camp_list":"Campanha","brand":"Seller","pedidos":"Pedidos"})
+                                .head(25))
+                    camp_agg = camp_agg.rename(columns={"combo":"Combo de Campanhas","brand":"Marca","pedidos":"Pedidos"})
                     total_camp = camp_agg["Pedidos"].sum()
-                    st.markdown(f"<div class='info'>📊 <strong>{len(camp_agg)}</strong> campanhas · "
+                    st.markdown(f"<div class='info'>📊 <strong>{len(camp_agg)}</strong> combos · "
                                 f"<strong>{total_camp}</strong> pedidos faturados com desconto</div>",
                                 unsafe_allow_html=True)
                     seller_colors = {s: list(COR_MARCA.values())[i % len(COR_MARCA)]
-                                     for i, s in enumerate(camp_agg["Seller"].unique())}
-                    fig_camp = px.bar(camp_agg, x="Pedidos", y="Campanha", orientation="h",
-                                      color="Seller", color_discrete_map=seller_colors,
+                                     for i, s in enumerate(camp_agg["Marca"].unique())}
+                    fig_camp = px.bar(camp_agg, x="Pedidos", y="Combo de Campanhas", orientation="h",
+                                      color="Marca", color_discrete_map=seller_colors,
                                       text="Pedidos",
-                                      labels={"Campanha":"","Pedidos":"Pedidos Faturados","Seller":"Marca"})
+                                      labels={"Combo de Campanhas":"","Pedidos":"Pedidos Faturados","Marca":"Marca"})
                     fig_camp.update_traces(textposition="outside")
-                    fig_camp.update_layout(**Li(height=max(300, len(camp_agg)*34)))
+                    fig_camp.update_layout(**Li(height=max(320, len(camp_agg)*36)))
                     st.plotly_chart(fig_camp, use_container_width=True)
                 else:
                     st.markdown("<div class='info'>ℹ️ Nenhum pedido faturado com campanha.</div>", unsafe_allow_html=True)
@@ -1580,14 +1583,15 @@ with tab_ec_tab:
             st.markdown("<div class='info'>ℹ️ Planilha EC carregada mas sem dados processados.</div>", unsafe_allow_html=True)
 
         sh("Detalhamento de Pedidos")
-        if ec_p_ec.empty:
-            st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado para o período selecionado.</div>", unsafe_allow_html=True)
+        _det_src = ec_p_ec if not ec_p_ec.empty else df_ec
+        if _det_src.empty:
+            st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado.</div>", unsafe_allow_html=True)
         else:
-            det = (ec_p_ec.drop_duplicates("order")
-                   [["order","data","status","payment_method","installments","quantity_sku"]]
+            det = (_det_src.drop_duplicates("order")
+                   [["order","data","status","payment_method","installments","quantity_sku","brand"]]
                    .rename(columns={"order":"Order ID","data":"Data","status":"Status",
                                     "payment_method":"Pagamento","installments":"Parcelas",
-                                    "quantity_sku":"Itens"})
+                                    "quantity_sku":"Itens","brand":"Marca"})
                    .sort_values("Data", ascending=False))
             st.dataframe(det, use_container_width=True, hide_index=True)
             st.download_button("📥 Exportar pedidos",
