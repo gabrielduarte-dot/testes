@@ -1114,8 +1114,8 @@ tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod, tab_acessos, tab_camp = 
 
 with tab_geral:
     df_meta = load_metas()
-    mes_atual  = hoje.month
-    ano_atual  = hoje.year
+    mes_atual  = data_ini.month
+    ano_atual  = data_ini.year
 
     if not df_meta.empty:
         m_mes = metas_do_mes(df_meta, ano_atual, mes_atual)
@@ -1295,8 +1295,8 @@ with tab_metas:
             unsafe_allow_html=True)
 
     m_ano_sel = metas_ano(df_meta, ano_meta)
-    hoje_meta = datetime.today().date()
-    m_acu_sel = metas_acumulado(df_meta, ano_meta, hoje_meta.month)
+    hoje_meta = data_ini
+    m_acu_sel = metas_acumulado(df_meta, ano_meta, data_ini.month)
 
     def pct_b(r, m): return min(r/m*100, 100) if m > 0 else 0
     def cor_b(r, m):
@@ -1340,7 +1340,7 @@ with tab_metas:
     with ya3: st.markdown(mc_card("🏪","Marketplace",    m_ano_sel["meta_mkt"],  m_ano_sel["real_mkt"],  "#f59e0b"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    sh(f"Acumulado até {hoje_meta.strftime('%B/%Y')} — {ano_meta}")
+    sh(f"Acumulado até {data_ini.strftime('%B/%Y')} — {ano_meta}")
     aa1, aa2, aa3 = st.columns(3)
     with aa1: st.markdown(mc_card("📊","Total Acumulado",     m_acu_sel["meta_total"],m_acu_sel["real_total"],""),         unsafe_allow_html=True)
     with aa2: st.markdown(mc_card("🛒","E-commerce Acumulado",m_acu_sel["meta_ec"],   m_acu_sel["real_ec"],   "#3b6fff"), unsafe_allow_html=True)
@@ -1463,21 +1463,20 @@ with tab_ec_tab:
         if df_ec.empty:
             st.markdown("<div class='warn'>⚠️ Planilha E-commerce carregada mas sem dados processados.</div>", unsafe_allow_html=True)
         else:
-            # Use full df_ec (all time) for payment/installments analysis
-            # Use ec_p_ec (filtered by period) for period-specific counts
-            ec_dedup     = (ec_p_ec if not ec_p_ec.empty else df_ec).drop_duplicates("order")
-            ec_fat_dedup = df_ec[df_ec["faturado"]].drop_duplicates("order").copy()
-            ec_fat_period = ec_p_ec[ec_p_ec["faturado"]].drop_duplicates("order") if not ec_p_ec.empty else ec_fat_dedup
-            n_fat_ec  = len(ec_fat_period)
-            n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
-            n_total   = len(ec_dedup)
-
+            _src = ec_p_ec if not ec_p_ec.empty else df_ec
+            _periodo_label = f"{data_ini.strftime('%d/%m/%Y')} → {data_fim.strftime('%d/%m/%Y')}"
             if ec_p_ec.empty:
                 _ec_min = df_ec["data"].min().strftime("%d/%m/%Y")
                 _ec_max = df_ec["data"].max().strftime("%d/%m/%Y")
                 st.markdown(f"<div class='warn'>⚠️ Sem pedidos EC no período selecionado. "
                             f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>. "
                             f"Exibindo análise geral abaixo.</div>", unsafe_allow_html=True)
+                _periodo_label = f"{_ec_min} → {_ec_max}"
+
+            ec_dedup     = _src.drop_duplicates("order")
+            ec_fat_dedup = ec_dedup[ec_dedup["faturado"]].copy()
+            n_fat_ec  = len(ec_fat_dedup)
+            n_canc_ec = int(ec_dedup["cancelado"].sum()) if "cancelado" in ec_dedup.columns else 0
 
             # ── Faturado vs Cancelado
             st_rows = []
@@ -1542,6 +1541,31 @@ with tab_ec_tab:
                         fig_parc.update_layout(**L(margin=dict(l=10,r=10,t=20,b=10),
                                                    xaxis=dict(tickmode="linear", dtick=1)))
                         st.plotly_chart(fig_parc, use_container_width=True)
+
+        # ── Cupons mais usados
+        sh("Cupons Mais Utilizados")
+        if "marketingtags" in ec_fat_dedup.columns:
+            _cupons = (ec_fat_dedup["marketingtags"]
+                       .fillna("").astype(str).str.strip()
+                       .replace("", pd.NA).dropna())
+            if not _cupons.empty:
+                cup_agg = (_cupons.value_counts()
+                           .reset_index()
+                           .rename(columns={"marketingtags":"Cupom","count":"Pedidos"})
+                           .head(15))
+                cup_total = int(cup_agg["Pedidos"].sum())
+                cup_agg["Share"] = (cup_agg["Pedidos"] / ec_fat_dedup["order"].nunique() * 100).round(1).astype(str) + "%"
+                st.markdown(f"<div class='info'>🏷️ <strong>{len(cup_agg)}</strong> cupons distintos · "
+                            f"<strong>{cup_total}</strong> pedidos com cupom de <strong>{ec_fat_dedup['order'].nunique()}</strong> faturados</div>",
+                            unsafe_allow_html=True)
+                fig_cup = px.bar(cup_agg, x="Pedidos", y="Cupom", orientation="h",
+                                 text="Pedidos",
+                                 labels={"Cupom":"","Pedidos":"Pedidos Faturados"})
+                fig_cup.update_traces(marker_color="#3b6fff", textposition="outside")
+                fig_cup.update_layout(**Li(height=max(260, len(cup_agg)*34)))
+                st.plotly_chart(fig_cup, use_container_width=True)
+            else:
+                st.markdown("<div class='info'>ℹ️ Nenhum cupom registrado nos pedidos faturados.</div>", unsafe_allow_html=True)
 
         # ── Campanhas que geraram pedidos faturados
         sh("Campanhas com Pedidos Faturados")
