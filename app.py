@@ -300,7 +300,9 @@ def fv(v):
 
 def fdt(df, ini, fim):
     if df is None or df.empty or "data" not in df.columns: return pd.DataFrame()
-    return df[(df["data"] >= pd.Timestamp(ini)) & (df["data"] <= pd.Timestamp(fim))].copy()
+    _ini = pd.Timestamp(ini)
+    _fim = pd.Timestamp(fim) + pd.Timedelta(days=1)  # exclusive end: catches full day
+    return df[(df["data"] >= _ini) & (df["data"] < _fim)].copy()
 
 def prev_p(ini, fim, modo):
     if modo == "Período anterior equivalente":
@@ -1092,8 +1094,6 @@ with fr[2]:
 with fr[3]:
     comp_modo = st.selectbox("Comparar com",
         ["Período anterior equivalente","Mês anterior","Mesmo período ano anterior"], key="comp")
-
-ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
 
 ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
 
@@ -1891,7 +1891,7 @@ with tab_acessos:
         st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de acessos.</div>", unsafe_allow_html=True)
     else:
         df_ac_f = df_ac[(df_ac["data_dt"] >= pd.Timestamp(data_ini)) &
-                        (df_ac["data_dt"] <= pd.Timestamp(data_fim))]
+                        (df_ac["data_dt"] < pd.Timestamp(data_fim) + pd.Timedelta(days=1))]
 
         marcas_ac = sorted(df_ac_f["Marca"].dropna().unique().tolist()) if not df_ac_f.empty else []
         marc_sel  = st.multiselect("Marca", marcas_ac, default=marcas_ac, key="ac_marc")
@@ -1979,7 +1979,7 @@ with tab_camp:
         st.markdown("<div class='info'>ℹ️ Carregue a planilha unificada para visualizar dados de campanhas.</div>", unsafe_allow_html=True)
     else:
         df_ca_f = df_ca[(df_ca["data_dt"] >= pd.Timestamp(data_ini)) &
-                        (df_ca["data_dt"] <= pd.Timestamp(data_fim))]
+                        (df_ca["data_dt"] < pd.Timestamp(data_fim) + pd.Timedelta(days=1))]
 
         c_top1, c_top2 = st.columns([2,1])
         with c_top1:
