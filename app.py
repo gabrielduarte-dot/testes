@@ -622,9 +622,42 @@ def load_url(url: str, tipo: str, token: str = "") -> tuple:
 
 def parse_csv(text, tipo):
     if tipo == "ec":
-        cols = _ec_colnames(text)
-        return pd.read_csv(StringIO(text), header=None, names=cols,
-                           dtype=str, keep_default_na=False, na_values=[""])
+        # Detect if first row is a header (contains known column names)
+        try:
+            import csv as _csv
+            first_row = list(_csv.reader([text.split("\n")[0]]))[0]
+            first_lower = [c.strip().lower() for c in first_row]
+            has_header = any(h in first_lower for h in ["order","creation","status","utmsource","payment system name"])
+        except Exception:
+            has_header = False
+
+        if has_header:
+            df = pd.read_csv(StringIO(text), dtype=str, keep_default_na=False, na_values=[""])
+            # Normalize column names to internal aliases
+            col_map = {
+                "creation":            "created_at",
+                "client name":         "customer_name",
+                "uf":                  "state",
+                "coupon":              "marketingtags",
+                "payment system name": "payment_method",
+                "quantity_sku":        "quantity_sku",
+                "id_sku":              "sku",
+                "reference code":      "referencia",
+                "sku name":            "product_name",
+                "sku total price":     "sku_selling_price",
+                "discounts names":     "discount_tags",
+                "seller name":         "brand",
+            }
+            df.columns = [col_map.get(c.strip().lower(), c.strip().lower()) for c in df.columns]
+            # Add missing columns with defaults
+            for col in ["livelo_tag","sku_total_price","phone","foto_produto","installments"]:
+                if col not in df.columns:
+                    df[col] = ""
+            return df
+        else:
+            cols = _ec_colnames(text)
+            return pd.read_csv(StringIO(text), header=None, names=cols,
+                               dtype=str, keep_default_na=False, na_values=[""])
     return pd.read_csv(StringIO(text), dtype=str, keep_default_na=False, na_values=[""])
 
 def read_upload(f, tipo):
@@ -713,51 +746,65 @@ def prep_mp(raw: pd.DataFrame) -> pd.DataFrame:
 def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.copy()
 
-    ncols = len(df.columns)
-    if ncols >= 19:
-        expected = EC_COLS_19
-    elif ncols == 18:
-        expected = EC_COLS_18
-    else:
-        expected = EC_COLS_17
-    if len(df.columns) == len(expected):
-        df.columns = expected
+    # If columns came from headerless format, rename by position
+    if "created_at" not in df.columns and len(df.columns) in (16, 17, 18, 19):
+        ncols = len(df.columns)
+        if ncols >= 19:   expected = EC_COLS_19
+        elif ncols == 18: expected = EC_COLS_18
+        else:             expected = EC_COLS_17
+        if len(df.columns) == len(expected):
+            df.columns = expected
+
+    # Ensure required columns exist with defaults
+    for col, default in [("livelo_tag",""), ("marketingtags",""), ("foto_produto",""),
+                         ("phone",""), ("sku_total_price","0"), ("discount_tags",""),
+                         ("brand",""), ("utmsource","")]:
+        if col not in df.columns:
+            df[col] = default
 
     def safe_num(s):
         return pd.to_numeric(
-            s.astype(str).str.strip().str.replace(",",".",regex=False),
+            s.astype(str).str.strip().str.replace(".",",",regex=False
+            ).str.replace(",",".",regex=False).str.replace(r"[^\d\.]","",regex=True),
             errors="coerce"
         ).fillna(0)
 
-    df["sku_selling_price"] = safe_num(df["sku_selling_price"])
-    df["quantity_sku"]      = safe_num(df["quantity_sku"])
+    # sku_selling_price may be named differently — try both
+    price_col = "sku_selling_price" if "sku_selling_price" in df.columns else "sku total price"
+    if price_col not in df.columns:
+        df["sku_selling_price"] = 0.0
+    else:
+        df["sku_selling_price"] = safe_num(df[price_col])
+
+    df["quantity_sku"] = safe_num(df["quantity_sku"]) if "quantity_sku" in df.columns else 1.0
 
     suspicious = (df["sku_selling_price"] < 10) & (df["sku_selling_price"] > 0)
     df.loc[suspicious, "sku_selling_price"] = df.loc[suspicious, "sku_selling_price"] * 1000
 
     df["line_total"] = df["sku_selling_price"] * df["quantity_sku"]
-    df["data"]       = pd.to_datetime(df["created_at"].astype(str).str.strip(),
-                                      errors="coerce", utc=True)
-    df["data"]       = df["data"].dt.tz_localize(None).dt.normalize()
-    df["status"]     = df["status"].astype(str).str.strip()
-    df["faturado"]   = df["status"].str.lower().isin(
-        ["faturado","aprovado","entregue","complete","paid","concluido","concluído"])
-    df["cancelado"]  = df["status"].str.lower().isin(
-        ["cancelado","cancelada","canceled","cancelled","devolvido","devolvida","returned","recusado"])
-    df["livelo"]     = df["livelo_tag"].astype(str).str.strip().str.lower() == "livelo"
-    df["utmsource"]  = df["utmsource"].replace("", np.nan).fillna("Direto").astype(str).str.strip()
-    df["order"]      = df["order"].astype(str).str.strip()
-    df["brand"]      = df["brand"].astype(str).str.strip()
 
-    if "foto_produto" in df.columns:
-        df["foto_produto"] = df["foto_produto"].astype(str).str.strip()
-        df["img_url"] = df["foto_produto"].apply(
-            lambda u: u if u.startswith("http") else ""
-        )
+    # Date — try created_at first, then creation
+    date_col = "created_at" if "created_at" in df.columns else "creation"
+    df["data"] = pd.to_datetime(df[date_col].astype(str).str.strip(),
+                                errors="coerce", dayfirst=True, utc=False)
+    if df["data"].dt.tz is not None:
+        df["data"] = df["data"].dt.tz_localize(None)
+    df["data"] = df["data"].dt.normalize()
+
+    df["status"]    = df["status"].astype(str).str.strip()
+    df["faturado"]  = df["status"].str.lower().isin(
+        ["faturado","aprovado","entregue","complete","paid","concluido","concluído"])
+    df["cancelado"] = df["status"].str.lower().isin(
+        ["cancelado","cancelada","canceled","cancelled","devolvido","devolvida","returned","recusado"])
+    df["livelo"]    = df["livelo_tag"].astype(str).str.strip().str.lower() == "livelo"
+    df["utmsource"] = df["utmsource"].replace("", np.nan).fillna("Direto").astype(str).str.strip()
+    df["order"]     = df["order"].astype(str).str.strip()
+    df["brand"]     = df["brand"].astype(str).str.strip()
+
+    if "foto_produto" in df.columns and df["foto_produto"].astype(str).str.startswith("http").any():
+        df["img_url"] = df["foto_produto"].apply(lambda u: u if str(u).startswith("http") else "")
     else:
-        df["img_url"] = (
-            IMG_BASE_URL + "/" + df["brand"] + "/Baixa/" + df["sku"] + IMG_EXT
-        )
+        df["img_url"] = IMG_BASE_URL + "/" + df["brand"] + "/Baixa/" + df.get("sku", pd.Series([""] * len(df))).astype(str) + IMG_EXT
 
     df = df.dropna(subset=["data"])
     return df
