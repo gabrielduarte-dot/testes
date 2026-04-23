@@ -1212,6 +1212,27 @@ with tab_geral:
     g4.metric("📑 NFs E-com",       f"{ec_m['total']:,}", delta=fv(vp(ec_m["total"], ec_ma["total"])))
     g5.metric("📑 NFs Marketplace", f"{mp_m['total']:,}", delta=fv(vp(mp_m["total"], mp_ma["total"])))
 
+    # ── Necessário por dia para bater a meta
+    if not df_meta.empty and m_mes["meta_total"] > 0:
+        import calendar as _cal2
+        _hoje_kpi   = datetime.today().date()
+        _dias_mes   = _cal2.monthrange(mes_atual, 0 if mes_atual == 0 else mes_atual)[1] if False else \
+                      _cal2.monthrange(ano_atual, mes_atual)[1]
+        _dia_atual  = min(_hoje_kpi.day, _dias_mes) if (_hoje_kpi.year == ano_atual and _hoje_kpi.month == mes_atual) else _dias_mes
+        _dias_rest  = max(_dias_mes - _dia_atual, 1)
+        _falta      = max(m_mes["meta_total"] - total_rec, 0)
+        _por_dia    = _falta / _dias_rest
+        _media_dia  = total_rec / _dia_atual if _dia_atual > 0 else 0
+        _cor_ritmo  = "#10b981" if _media_dia >= _por_dia else "#f43f5e"
+        st.markdown(
+            f"<div class='info' style='display:flex;gap:32px;align-items:center;flex-wrap:wrap;'>"
+            f"<span>📅 <strong>Dias restantes no mês:</strong> {_dias_rest}</span>"
+            f"<span>🎯 <strong>Falta para meta:</strong> {brl(_falta)}</span>"
+            f"<span style='color:{_cor_ritmo};'>⚡ <strong>Necessário/dia:</strong> {brl(_por_dia)}</span>"
+            f"<span>📈 <strong>Média atual/dia:</strong> {brl(_media_dia)}</span>"
+            f"</div>",
+            unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
     if total_rec > 0:
         pec = ec_m["receita"]/total_rec*100; pmp = mp_m["receita"]/total_rec*100
@@ -1224,13 +1245,15 @@ with tab_geral:
     if not mp_ecom_all.empty:
         sh("Resumo por Marca")
         MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
+        _dias_periodo = max((data_fim - data_ini).days + 1, 1)
         cols_rc = st.columns(len(MARCAS_ECOM))
         for idx, marca in enumerate(MARCAS_ECOM):
             df_m = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
-            notas    = int(df_m["nota"].nunique()) if not df_m.empty else 0
-            itens    = int(df_m["itens"].round().sum()) if not df_m.empty else 0
-            receita  = float(df_m["receita"].sum()) if not df_m.empty else 0
-            ticket   = receita / notas if notas > 0 else 0
+            notas   = int(df_m["nota"].nunique()) if not df_m.empty else 0
+            itens   = int(df_m["itens"].round().sum()) if not df_m.empty else 0
+            receita = float(df_m["receita"].sum()) if not df_m.empty else 0
+            ticket  = receita / notas if notas > 0 else 0
+            media_d = receita / _dias_periodo
             cor = COR_MARCA.get(marca, "#3b6fff")
             with cols_rc[idx]:
                 st.markdown(f"""
@@ -1240,6 +1263,7 @@ with tab_geral:
                   <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
                   <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
                   <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
+                  <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
                 </div>
                 """, unsafe_allow_html=True)
 
