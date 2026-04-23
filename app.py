@@ -1242,30 +1242,53 @@ with tab_geral:
             f"Marketplace <strong>{pmp:.1f}%</strong> (R$ {mp_m['receita']:,.0f})</div>",
             unsafe_allow_html=True)
 
-    if not mp_ecom_all.empty:
-        sh("Resumo por Marca")
-        MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
+    if not mp_ecom_all.empty or not mp_mkt_all.empty:
         _dias_periodo = max((data_fim - data_ini).days + 1, 1)
-        cols_rc = st.columns(len(MARCAS_ECOM))
+
+        def _rc_card(cor, titulo, notas, itens, receita, ticket, media_d):
+            return f"""
+            <div class="rc">
+              <p class="rc-title" style="color:{cor};">{titulo}</p>
+              <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
+              <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
+              <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
+              <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
+              <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
+            </div>"""
+
+        sh("E-commerce por Marca")
+        MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
+        cols_ec = st.columns(len(MARCAS_ECOM))
         for idx, marca in enumerate(MARCAS_ECOM):
-            df_m = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
-            notas   = int(df_m["nota"].nunique()) if not df_m.empty else 0
-            itens   = int(df_m["itens"].round().sum()) if not df_m.empty else 0
-            receita = float(df_m["receita"].sum()) if not df_m.empty else 0
+            df_m    = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
+            notas   = int(df_m["nota"].nunique())       if not df_m.empty else 0
+            itens   = int(df_m["itens"].round().sum())  if not df_m.empty else 0
+            receita = float(df_m["receita"].sum())      if not df_m.empty else 0
             ticket  = receita / notas if notas > 0 else 0
             media_d = receita / _dias_periodo
-            cor = COR_MARCA.get(marca, "#3b6fff")
-            with cols_rc[idx]:
-                st.markdown(f"""
-                <div class="rc">
-                  <p class="rc-title" style="color:{cor};">{marca}</p>
-                  <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
-                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
-                  <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
-                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
-                  <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
-                </div>
-                """, unsafe_allow_html=True)
+            with cols_ec[idx]:
+                st.markdown(_rc_card(COR_MARCA.get(marca,"#3b6fff"), marca,
+                                     notas, itens, receita, ticket, media_d),
+                            unsafe_allow_html=True)
+
+        sh("Marketplace por Plataforma")
+        PLATS_MKT = sorted(mp_p["MARKETPLACE"].unique().tolist()) if not mp_p.empty else []
+        if PLATS_MKT:
+            cols_mp = st.columns(min(len(PLATS_MKT), 4))
+            for idx, plat in enumerate(PLATS_MKT[:4]):
+                df_m    = mp_p[mp_p["MARKETPLACE"] == plat] if not mp_p.empty else pd.DataFrame()
+                notas   = int(df_m["nota"].nunique())       if not df_m.empty else 0
+                itens   = int(df_m["itens"].round().sum())  if not df_m.empty else 0
+                receita = float(df_m["receita"].sum())      if not df_m.empty else 0
+                ticket  = receita / notas if notas > 0 else 0
+                media_d = receita / _dias_periodo
+                with cols_mp[idx]:
+                    st.markdown(_rc_card(COR_MP.get(plat,"#f59e0b"), plat,
+                                         notas, itens, receita, ticket, media_d),
+                                unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='info'>ℹ️ Sem dados de Marketplace no período.</div>",
+                        unsafe_allow_html=True)
 
     col_ev, col_sh = st.columns([3, 1])
     with col_ev:
