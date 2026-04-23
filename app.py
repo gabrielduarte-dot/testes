@@ -1244,51 +1244,28 @@ with tab_geral:
 
     if not mp_ecom_all.empty or not mp_mkt_all.empty:
         _dias_periodo = max((data_fim - data_ini).days + 1, 1)
-
-        def _rc_card(cor, titulo, notas, itens, receita, ticket, media_d):
-            return f"""
-            <div class="rc">
-              <p class="rc-title" style="color:{cor};">{titulo}</p>
-              <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
-              <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
-              <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
-              <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
-              <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
-            </div>"""
-
-        sh("E-commerce por Marca")
+        sh("Resumo por Marca")
         MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
-        cols_ec = st.columns(len(MARCAS_ECOM))
+        cols_rc = st.columns(len(MARCAS_ECOM))
         for idx, marca in enumerate(MARCAS_ECOM):
             df_m    = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
-            notas   = int(df_m["nota"].nunique())       if not df_m.empty else 0
-            itens   = int(df_m["itens"].round().sum())  if not df_m.empty else 0
-            receita = float(df_m["receita"].sum())      if not df_m.empty else 0
+            notas   = int(df_m["nota"].nunique())      if not df_m.empty else 0
+            itens   = int(df_m["itens"].round().sum()) if not df_m.empty else 0
+            receita = float(df_m["receita"].sum())     if not df_m.empty else 0
             ticket  = receita / notas if notas > 0 else 0
             media_d = receita / _dias_periodo
-            with cols_ec[idx]:
-                st.markdown(_rc_card(COR_MARCA.get(marca,"#3b6fff"), marca,
-                                     notas, itens, receita, ticket, media_d),
-                            unsafe_allow_html=True)
-
-        sh("Marketplace por Plataforma")
-        PLATS_MKT = sorted(mp_p["MARKETPLACE"].unique().tolist()) if not mp_p.empty else []
-        if PLATS_MKT:
-            cols_mp = st.columns(min(len(PLATS_MKT), 4))
-            for idx, plat in enumerate(PLATS_MKT[:4]):
-                df_m    = mp_p[mp_p["MARKETPLACE"] == plat] if not mp_p.empty else pd.DataFrame()
-                notas   = int(df_m["nota"].nunique())       if not df_m.empty else 0
-                itens   = int(df_m["itens"].round().sum())  if not df_m.empty else 0
-                receita = float(df_m["receita"].sum())      if not df_m.empty else 0
-                ticket  = receita / notas if notas > 0 else 0
-                media_d = receita / _dias_periodo
-                with cols_mp[idx]:
-                    st.markdown(_rc_card(COR_MP.get(plat,"#f59e0b"), plat,
-                                         notas, itens, receita, ticket, media_d),
-                                unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='info'>ℹ️ Sem dados de Marketplace no período.</div>",
-                        unsafe_allow_html=True)
+            cor     = COR_MARCA.get(marca, "#3b6fff")
+            with cols_rc[idx]:
+                st.markdown(f"""
+                <div class="rc">
+                  <p class="rc-title" style="color:{cor};">{marca}</p>
+                  <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
+                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
+                  <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
+                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
+                  <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
 
     col_ev, col_sh = st.columns([3, 1])
     with col_ev:
@@ -1505,6 +1482,24 @@ with tab_ec_tab:
         e2.metric("📑 NFs",        f"{ec_m['total']:,}",  delta=fv(vp(ec_m["total"], ec_ma["total"])))
         e3.metric("📦 Itens",      f"{ec_m['itens']:,}",  delta=fv(vp(ec_m["itens"], ec_ma["itens"])))
         e4.metric("🎟️ Ticket NF", brl(ec_m["ticket"]),  delta=fv(vp(ec_m["ticket"], ec_ma["ticket"])))
+
+        if not df_meta.empty and m_mes["meta_ec"] > 0:
+            import calendar as _c2
+            _hj = datetime.today().date()
+            _dm = _c2.monthrange(ano_atual, mes_atual)[1]
+            _da = min(_hj.day, _dm) if (_hj.year == ano_atual and _hj.month == mes_atual) else _dm
+            _dr = max(_dm - _da, 1)
+            _falta_ec  = max(m_mes["meta_ec"] - ec_m["receita"], 0)
+            _nd_ec     = _falta_ec / _dr
+            _med_ec    = ec_m["receita"] / _da if _da > 0 else 0
+            _cor_ec    = "#10b981" if _med_ec >= _nd_ec else "#f43f5e"
+            st.markdown(
+                f"<div class='info' style='display:flex;gap:32px;align-items:center;flex-wrap:wrap;margin-top:8px;'>"
+                f"<span>📅 <strong>Dias restantes:</strong> {_dr}</span>"
+                f"<span>🎯 <strong>Falta para meta EC:</strong> {brl(_falta_ec)}</span>"
+                f"<span style='color:{_cor_ec};'>⚡ <strong>Necessário/dia:</strong> {brl(_nd_ec)}</span>"
+                f"<span>📈 <strong>Média atual/dia:</strong> {brl(_med_ec)}</span>"
+                f"</div>", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         ea1, ea2 = st.columns(2)
@@ -1734,6 +1729,24 @@ with tab_mp_tab:
         m2.metric("📑 NFs",          f"{mp_m['total']:,}",  delta=fv(vp(mp_m["total"], mp_ma["total"])))
         m3.metric("📦 Itens",        f"{mp_m['itens']:,}",  delta=fv(vp(mp_m["itens"], mp_ma["itens"])))
         m4.metric("🎟️ Ticket Médio", brl(mp_m["ticket"]),  delta=fv(vp(mp_m["ticket"], mp_ma["ticket"])))
+
+        if not df_meta.empty and m_mes["meta_mkt"] > 0:
+            import calendar as _c3
+            _hj2 = datetime.today().date()
+            _dm2 = _c3.monthrange(ano_atual, mes_atual)[1]
+            _da2 = min(_hj2.day, _dm2) if (_hj2.year == ano_atual and _hj2.month == mes_atual) else _dm2
+            _dr2 = max(_dm2 - _da2, 1)
+            _falta_mkt = max(m_mes["meta_mkt"] - mp_m["receita"], 0)
+            _nd_mkt    = _falta_mkt / _dr2
+            _med_mkt   = mp_m["receita"] / _da2 if _da2 > 0 else 0
+            _cor_mkt   = "#10b981" if _med_mkt >= _nd_mkt else "#f43f5e"
+            st.markdown(
+                f"<div class='info' style='display:flex;gap:32px;align-items:center;flex-wrap:wrap;margin-top:8px;'>"
+                f"<span>📅 <strong>Dias restantes:</strong> {_dr2}</span>"
+                f"<span>🎯 <strong>Falta para meta MKT:</strong> {brl(_falta_mkt)}</span>"
+                f"<span style='color:{_cor_mkt};'>⚡ <strong>Necessário/dia:</strong> {brl(_nd_mkt)}</span>"
+                f"<span>📈 <strong>Média atual/dia:</strong> {brl(_med_mkt)}</span>"
+                f"</div>", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         mp1, mp2 = st.columns(2)
