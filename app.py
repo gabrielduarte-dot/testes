@@ -786,17 +786,18 @@ def prep_ec(raw: pd.DataFrame) -> pd.DataFrame:
 
     df["line_total"] = df["sku_selling_price"] * df["quantity_sku"]
 
-    # Date — try created_at first, then creation
     date_col = "created_at" if "created_at" in df.columns else "creation"
-    _raw_dates = df[date_col].astype(str).str.strip()
-    # Try ISO format with UTC first (old format: 2026-04-01 10:00:00Z)
-    _parsed = pd.to_datetime(_raw_dates, errors="coerce", utc=True)
-    if _parsed.isna().mean() > 0.5:
-        # Fallback to BR dayfirst format (new format: 30/01/2026)
-        _parsed = pd.to_datetime(_raw_dates, errors="coerce", dayfirst=True)
-    # Remove timezone info if present
-    if _parsed.dt.tz is not None:
-        _parsed = _parsed.dt.tz_localize(None)
+    _raw = df[date_col].astype(str).str.strip()
+    # Detect format: ISO starts with 4-digit year followed by '-' (e.g. 2026-04-01)
+    # BR format: DD/MM/YYYY (e.g. 01/04/2026)
+    _sample = _raw.dropna().iloc[0] if not _raw.dropna().empty else ""
+    _is_iso = len(_sample) >= 10 and _sample[4:5] == "-"
+    if _is_iso:
+        _parsed = pd.to_datetime(_raw, errors="coerce", utc=True)
+        if _parsed.dt.tz is not None:
+            _parsed = _parsed.dt.tz_localize(None)
+    else:
+        _parsed = pd.to_datetime(_raw, errors="coerce", dayfirst=True)
     df["data"] = _parsed.dt.normalize()
 
     df["status"]    = df["status"].astype(str).str.strip()
