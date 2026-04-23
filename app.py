@@ -1276,14 +1276,17 @@ with tab_geral:
             st.plotly_chart(fig_sh, use_container_width=True)
 
     sh("Unidades Vendidas por Marca — Evolução Diária")
+    _MARCAS_PRINCIPAIS = ["Seculus", "Mondaine", "Timex", "E-time"]
     _all_nf = pd.concat([df for df in [ec_p, mp_p] if not df.empty and "marca" in df.columns],
                         ignore_index=True) if (not ec_p.empty or not mp_p.empty) else pd.DataFrame()
     if not _all_nf.empty:
+        _all_nf = _all_nf[_all_nf["marca"].isin(_MARCAS_PRINCIPAIS)]
         _units = (_all_nf.groupby(["data","marca"])
                   .agg(itens=("itens","sum")).reset_index())
         fig_units = go.Figure()
-        for marca in sorted(_units["marca"].unique()):
+        for marca in _MARCAS_PRINCIPAIS:
             _m = _units[_units["marca"]==marca]
+            if _m.empty: continue
             cor = COR_MARCA.get(marca, "#64748b")
             fig_units.add_trace(go.Scatter(
                 x=_m["data"], y=_m["itens"], name=marca,
@@ -1632,11 +1635,10 @@ with tab_ec_tab:
                 st.markdown("<div class='info'>ℹ️ Coluna <code>discount_tags</code> não encontrada.</div>", unsafe_allow_html=True)
 
         sh("Detalhamento de Pedidos")
-        _det_src = ec_p_ec if not ec_p_ec.empty else df_ec
-        if _det_src.empty:
-            st.markdown("<div class='warn'>⚠️ Nenhum pedido encontrado.</div>", unsafe_allow_html=True)
+        if ec_p_ec.empty:
+            st.markdown("<div class='info'>ℹ️ Sem pedidos no período selecionado.</div>", unsafe_allow_html=True)
         else:
-            det = (_det_src.drop_duplicates("order")
+            det = (ec_p_ec.drop_duplicates("order")
                    [["order","data","status","payment_method","installments","quantity_sku","brand"]]
                    .rename(columns={"order":"Order ID","data":"Data","status":"Status",
                                     "payment_method":"Pagamento","installments":"Parcelas",
