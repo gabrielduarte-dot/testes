@@ -1481,9 +1481,10 @@ with tab_ec_tab:
 
         sh("Evolução Diária por Marca")
         ec_d = ec_p.groupby(["data","marca"]).agg(receita=("receita","sum")).reset_index()
-        fig_edd = px.area(ec_d, x="data", y="receita", color="marca",
+        fig_edd = px.line(ec_d, x="data", y="receita", color="marca",
                           color_discrete_map=COR_MARCA,
                           labels={"receita":"Receita (R$)","data":"","marca":"Marca"})
+        fig_edd.update_traces(line=dict(width=2.5))
         fig_edd.update_layout(**L())
         st.plotly_chart(fig_edd, use_container_width=True)
 
@@ -1709,9 +1710,10 @@ with tab_mp_tab:
 
         sh("Evolução Diária por Plataforma")
         mp_d = mp_p.groupby(["data","MARKETPLACE"])["receita"].sum().reset_index()
-        fig_mpd = px.area(mp_d, x="data", y="receita", color="MARKETPLACE",
+        fig_mpd = px.line(mp_d, x="data", y="receita", color="MARKETPLACE",
                           color_discrete_map=COR_MP,
                           labels={"receita":"Receita (R$)","data":"","MARKETPLACE":"Plataforma"})
+        fig_mpd.update_traces(line=dict(width=2.5))
         fig_mpd.update_layout(**L())
         st.plotly_chart(fig_mpd, use_container_width=True)
 
@@ -1979,9 +1981,10 @@ with tab_acessos:
             sh("Evolução Diária de Sessões")
             ac_daily = (df_ac_f.groupby(["data_dt","Cluster"])
                         .agg(sessoes=("sessoes_num","sum")).reset_index())
-            fig_ac_ev = px.area(ac_daily, x="data_dt", y="sessoes", color="Cluster",
+            fig_ac_ev = px.line(ac_daily, x="data_dt", y="sessoes", color="Cluster",
                                 color_discrete_map=COR_CLUSTER,
                                 labels={"sessoes":"Sessões","data_dt":"","Cluster":"Canal"})
+            fig_ac_ev.update_traces(line=dict(width=2))
             fig_ac_ev.update_layout(**L())
             st.plotly_chart(fig_ac_ev, use_container_width=True)
 
