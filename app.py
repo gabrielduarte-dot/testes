@@ -1275,6 +1275,26 @@ with tab_geral:
             fig_sh.update_layout(**L(margin=dict(l=10,r=10,t=30,b=10)))
             st.plotly_chart(fig_sh, use_container_width=True)
 
+    sh("Unidades Vendidas por Marca — Evolução Diária")
+    _all_nf = pd.concat([df for df in [ec_p, mp_p] if not df.empty and "marca" in df.columns],
+                        ignore_index=True) if (not ec_p.empty or not mp_p.empty) else pd.DataFrame()
+    if not _all_nf.empty:
+        _units = (_all_nf.groupby(["data","marca"])
+                  .agg(itens=("itens","sum")).reset_index())
+        fig_units = go.Figure()
+        for marca in sorted(_units["marca"].unique()):
+            _m = _units[_units["marca"]==marca]
+            cor = COR_MARCA.get(marca, "#64748b")
+            fig_units.add_trace(go.Scatter(
+                x=_m["data"], y=_m["itens"], name=marca,
+                mode="lines+markers",
+                line=dict(color=cor, width=2.5, shape="spline", smoothing=1.0),
+                marker=dict(size=5, color=cor),
+            ))
+        fig_units.update_layout(**L(yaxis=dict(
+            title="Unidades", gridcolor="#1a2540", zeroline=False)))
+        st.plotly_chart(fig_units, use_container_width=True)
+
     cb1, cb2 = st.columns(2)
     with cb1:
         sh("E-commerce por Marca")
@@ -1488,8 +1508,9 @@ with tab_ec_tab:
         elif ec_p_ec.empty:
             _ec_min = df_ec["data"].min().strftime("%d/%m/%Y")
             _ec_max = df_ec["data"].max().strftime("%d/%m/%Y")
-            st.markdown(f"<div class='warn'>⚠️ Sem pedidos EC no período selecionado. "
-                        f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>.</div>",
+            st.markdown(f"<div class='info'>ℹ️ A planilha E-commerce não possui pedidos no período selecionado. "
+                        f"Dados disponíveis: <strong>{_ec_min} → {_ec_max}</strong>. "
+                        f"Selecione um período dentro desse intervalo para ver os detalhes.</div>",
                         unsafe_allow_html=True)
         else:
             ec_dedup     = ec_p_ec.drop_duplicates("order")
