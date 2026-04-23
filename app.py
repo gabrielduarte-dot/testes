@@ -1108,6 +1108,8 @@ with fr[3]:
 data_ini = st.session_state.d_ini
 data_fim = st.session_state.d_fim
 
+ini_ant, fim_ant = prev_p(data_ini, data_fim, comp_modo)
+
 ec_p  = fdt(mp_ecom_all, data_ini, data_fim)
 mp_p  = fdt(mp_mkt_all,  data_ini, data_fim)
 ec_pa = fdt(mp_ecom_all, ini_ant,  fim_ant)
