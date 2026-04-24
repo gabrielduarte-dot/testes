@@ -1467,6 +1467,50 @@ with tab_metas:
     with aa2: st.markdown(mc_card("🛒","E-commerce Acumulado",m_acu_sel["meta_ec"],   m_acu_sel["real_ec"],   "#3b6fff"), unsafe_allow_html=True)
     with aa3: st.markdown(mc_card("🏪","Marketplace Acumulado",m_acu_sel["meta_mkt"], m_acu_sel["real_mkt"],  "#f59e0b"), unsafe_allow_html=True)
 
+    # ── Meta por Marca
+    _sid_mi = st.session_state.get("sheet_id","")
+    _gid_mi = st.session_state.get("_gid_mi","3")
+    _tok_mi = _get_sa_token()
+    df_mi   = load_meta_inv(gid_url(_sid_mi, _gid_mi), _tok_mi) if _sid_mi else pd.DataFrame()
+
+    if not df_mi.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        sh("Meta por Marca — Mês Selecionado")
+        mi = meta_inv_do_mes(df_mi, data_ini.month)
+        def _real_marca(marca):
+            df_m = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
+            return float(df_m["receita"].sum()) if not df_m.empty else 0.0
+        mi_cols = st.columns(4)
+        for idx, (marca, meta, cor) in enumerate([
+            ("Seculus",  mi["meta_sec"], COR_MARCA.get("Seculus","#3b6fff")),
+            ("Mondaine", mi["meta_mon"], COR_MARCA.get("Mondaine","#f59e0b")),
+            ("Timex",    mi["meta_tim"], COR_MARCA.get("Timex","#10b981")),
+            ("E-time",   mi["meta_eti"], COR_MARCA.get("E-time","#f43f5e")),
+        ]):
+            real  = _real_marca(marca)
+            dif   = real - meta
+            pct   = min(real/meta*100, 100) if meta > 0 else 0
+            bar_c = "#10b981" if pct>=100 else ("#f59e0b" if pct>=70 else "#f43f5e")
+            s_dif = "+" if dif >= 0 else ""
+            dc    = "pos" if dif >= 0 else "neg"
+            with mi_cols[idx]:
+                st.markdown(f"""
+                <div class="mc {'ok' if pct>=100 else ('warn2' if pct>=70 else 'bad')}">
+                  <div class="mc-label" style="color:{cor};">{marca}</div>
+                  <div class="mc-value">{brl(real)}</div>
+                  <div class="mc-sub">
+                    <span class="{dc}">{s_dif}{brl(dif)}</span>
+                    <span class="dot-sep">·</span>
+                    <span class="neu">{pct:.0f}% da meta</span>
+                  </div>
+                  <div class="meta-bar-wrap">
+                    <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{bar_c};"></div>
+                  </div>
+                  <div class="mc-progress-row">
+                    <span class="mc-pct">Meta: {brl(meta)}</span>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
     sh("Detalhe Mensal por Canal")
 
@@ -1521,67 +1565,8 @@ with tab_metas:
     })
     st.dataframe(df_tab, use_container_width=True, hide_index=True)
 
-    # ── Meta por Marca (nova aba Meta x Investimento)
-    _sid_mi = st.session_state.get("sheet_id","")
-    _gid_mi = st.session_state.get("_gid_mi","3")
-    _tok_mi = _get_sa_token()
-    df_mi   = load_meta_inv(gid_url(_sid_mi, _gid_mi), _tok_mi) if _sid_mi else pd.DataFrame()
 
-    if not df_mi.empty:
-        st.markdown("<br>", unsafe_allow_html=True)
-        sh("Meta por Marca — Mês Selecionado")
-        mi = meta_inv_do_mes(df_mi, data_ini.month)
-
-        MARCAS_MI = [
-            ("Seculus",  mi["meta_sec"], COR_MARCA.get("Seculus","#3b6fff")),
-            ("Mondaine", mi["meta_mon"], COR_MARCA.get("Mondaine","#f59e0b")),
-            ("Timex",    mi["meta_tim"], COR_MARCA.get("Timex","#10b981")),
-            ("E-time",   mi["meta_eti"], COR_MARCA.get("E-time","#f43f5e")),
-        ]
-        # Get realized per brand from NF data for the period
-        def _real_marca(marca):
-            df_m = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
-            return float(df_m["receita"].sum()) if not df_m.empty else 0.0
-
-        mi_cols = st.columns(4)
-        for idx, (marca, meta, cor) in enumerate(MARCAS_MI):
-            real  = _real_marca(marca)
-            dif   = real - meta
-            pct   = min(real / meta * 100, 100) if meta > 0 else 0
-            bar_c = "#10b981" if pct >= 100 else ("#f59e0b" if pct >= 70 else "#f43f5e")
-            s_dif = "+" if dif >= 0 else ""
-            dc    = "pos" if dif >= 0 else "neg"
-            with mi_cols[idx]:
-                st.markdown(f"""
-                <div class="mc {'ok' if pct>=100 else ('warn2' if pct>=70 else 'bad')}">
-                  <div class="mc-label" style="color:{cor};">{marca}</div>
-                  <div class="mc-value">{brl(real)}</div>
-                  <div class="mc-sub">
-                    <span class="{dc}">{s_dif}{brl(dif)}</span>
-                    <span class="dot-sep">·</span>
-                    <span class="neu">{pct:.0f}% da meta</span>
-                  </div>
-                  <div class="meta-bar-wrap">
-                    <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{bar_c};"></div>
-                  </div>
-                  <div class="mc-progress-row">
-                    <span class="mc-pct">Meta: {brl(meta)}</span>
-                  </div>
-                </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        sh("Meta por Marca — Evolução Anual")
-        mi_rows = []
-        for _, row in df_mi.iterrows():
-            for marca, col in [("Seculus","meta_sec"),("Mondaine","meta_mon"),
-                                ("Timex","meta_tim"),("E-time","meta_eti")]:
-                mi_rows.append({"Mês": row["mes_str"], "Marca": marca, "Meta": row[col]})
-        df_mi_long = pd.DataFrame(mi_rows)
-        fig_mi = px.bar(df_mi_long, x="Mês", y="Meta", color="Marca",
-                        color_discrete_map=COR_MARCA, barmode="group",
-                        labels={"Meta":"Meta (R$)","Mês":""})
-        fig_mi.update_layout(**L())
-        st.plotly_chart(fig_mi, use_container_width=True)
+with tab_ec_tab:
     sh("E-commerce — Receita via Notas Fiscais")
     if ec_p.empty:
         st.info("Nenhuma nota fiscal de E-commerce no período selecionado.")
@@ -2218,17 +2203,16 @@ with tab_camp:
             mi_ca    = meta_inv_do_mes(df_mi_ca, data_ini.month)
 
             sh("Resumo de Campanhas do Período")
-            ck1,ck2,ck3,ck4,ck5 = st.columns(5)
-            ck1.metric("💸 Investimento", brl(tot_inv),
-                       delta=f"Meta: {brl(mi_ca['meta_inv'])}" if mi_ca["meta_inv"] > 0 else None)
-            ck2.metric("💰 Receita",      brl(tot_rec_c))
-            ck3.metric("📦 Transações",   f"{tot_trans:,}")
-            # ROAS com meta
-            _roas_delta = f"Meta: {mi_ca['meta_roas']:.2f}x" if mi_ca["meta_roas"] > 0 else None
-            _roas_color = None  # positive if above meta
-            ck4.metric("📈 ROAS Médio",   f"{roas_med:.2f}x",
-                       delta=f"{(roas_med - mi_ca['meta_roas']):+.2f}x vs meta" if mi_ca["meta_roas"] > 0 else None)
-            ck5.metric("🎯 CPA Médio",    brl(cpa_med))
+            tot_trans1 = int(df_ca_f["trans1"].sum()) if "trans1" in df_ca_f.columns else 0
+            ck1,ck2,ck3,ck4,ck5,ck6 = st.columns(6)
+            ck1.metric("💸 Investimento",    brl(tot_inv))
+            ck2.metric("💰 Receita",          brl(tot_rec_c))
+            ck3.metric("📦 Transações",       f"{tot_trans:,}")
+            ck4.metric("🆕 1ª Compra",        f"{tot_trans1:,}")
+            ck5.metric("📈 ROAS",
+                       f"{roas_med:.2f}x",
+                       delta=f"{(roas_med - mi_ca['meta_roas']):+.2f}x (meta {mi_ca['meta_roas']:.2f}x)" if mi_ca["meta_roas"] > 0 else None)
+            ck6.metric("🎯 CPA Médio",        brl(cpa_med))
 
             # Investment by brand summary
             if not df_mi_ca.empty and mi_ca["meta_inv"] > 0:
