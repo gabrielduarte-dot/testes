@@ -8,6 +8,8 @@ import re
 from datetime import datetime, timedelta, date
 import numpy as np
 import json
+import io
+import base64
 
 try:
     from google.oauth2 import service_account
@@ -15,6 +17,14 @@ try:
     HAS_GOOGLE_AUTH = True
 except ImportError:
     HAS_GOOGLE_AUTH = False
+
+try:
+    from googleapiclient.discovery import build as _gapi_build
+    HAS_GAPI = True
+except ImportError:
+    HAS_GAPI = False
+
+SLIDES_PRESENTATION_ID = "1zlJ0KXjhS9UKadTkHA-GTyUh2jGWX8WhQRx-Z5xUhvE"
 
 st.set_page_config(
     page_title="Dashboard de Vendas · Grupo Seculus",
@@ -563,7 +573,8 @@ for k, v in [("df_mp_raw", None),("df_ec_raw", None),
         st.session_state[k] = v
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly",
-          "https://www.googleapis.com/auth/drive.readonly"]
+          "https://www.googleapis.com/auth/drive",
+          "https://www.googleapis.com/auth/presentations"]
 
 @st.cache_resource
 def _sa_credentials():
@@ -590,6 +601,179 @@ def _get_sa_token() -> str:
 def _sa_configured() -> bool:
     """Check whether SA secrets are present and loadable."""
     return _sa_credentials() is not None
+
+
+
+def _slides_service():
+    creds = _sa_credentials()
+    if creds is None or not HAS_GAPI: return None
+    try:
+        creds.refresh(GoogleRequest())
+        return _gapi_build("slides", "v1", credentials=creds, cache_discovery=False)
+    except Exception: return None
+
+def _drive_service():
+    creds = _sa_credentials()
+    if creds is None or not HAS_GAPI: return None
+    try:
+        creds.refresh(GoogleRequest())
+        return _gapi_build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception: return None
+
+def _fig_to_png_b64(fig) -> str:
+    try:
+        return base64.b64encode(fig.to_image(format="png", width=900, height=420, scale=2)).decode("utf-8")
+    except Exception: return ""
+
+def _upload_img_drive(b64_data, filename, drive_svc):
+    try:
+        from googleapiclient.http import MediaIoBaseUpload
+        media = io.BytesIO(base64.b64decode(b64_data))
+        f = drive_svc.files().create(
+            body={"name": filename, "mimeType": "image/png"},
+            media_body=MediaIoBaseUpload(media, mimetype="image/png"), fields="id").execute()
+        fid = f.get("id")
+        drive_svc.permissions().create(fileId=fid, body={"type":"anyone","role":"reader"}).execute()
+        return f"https://drive.google.com/uc?id={fid}"
+    except Exception: return ""
+
+def _get_slide_ids(svc):
+    try:
+        p = svc.presentations().get(presentationId=SLIDES_PRESENTATION_ID).execute()
+        return [s["objectId"] for s in p.get("slides", [])]
+    except Exception: return []
+
+def _clear_slide(svc, sid):
+    try:
+        p = svc.presentations().get(presentationId=SLIDES_PRESENTATION_ID).execute()
+        reqs = []
+        for s in p.get("slides", []):
+            if s["objectId"] == sid:
+                for e in s.get("pageElements", []): reqs.append({"deleteObject":{"objectId":e["objectId"]}})
+        if reqs:
+            svc.presentations().batchUpdate(presentationId=SLIDES_PRESENTATION_ID, body={"requests":reqs}).execute()
+    except Exception: pass
+
+def _tb(sid, text, x, y, w, h, fs=14, bold=False, color=(1,1,1)):
+    eid = f"tb{abs(hash(sid+text+str(x)+str(y)))%9999999}"
+    r,g,b = color
+    return [
+        {"createShape":{"objectId":eid,"shapeType":"TEXT_BOX","elementProperties":{"pageObjectId":sid,
+            "size":{"width":{"magnitude":w,"unit":"PT"},"height":{"magnitude":h,"unit":"PT"}},
+            "transform":{"scaleX":1,"scaleY":1,"translateX":x,"translateY":y,"unit":"PT"}}}},
+        {"insertText":{"objectId":eid,"text":text}},
+        {"updateTextStyle":{"objectId":eid,"textRange":{"type":"ALL"},"style":{"bold":bold,
+            "fontSize":{"magnitude":fs,"unit":"PT"},
+            "foregroundColor":{"opaqueColor":{"rgbColor":{"red":r,"green":g,"blue":b}}}},
+            "fields":"bold,fontSize,foregroundColor"}},
+    ]
+
+def _imgr(sid, url, x, y, w, h):
+    eid = f"im{abs(hash(sid+url+str(x)))%9999999}"
+    return [{"createImage":{"objectId":eid,"url":url,"elementProperties":{"pageObjectId":sid,
+        "size":{"width":{"magnitude":w,"unit":"PT"},"height":{"magnitude":h,"unit":"PT"}},
+        "transform":{"scaleX":1,"scaleY":1,"translateX":x,"translateY":y,"unit":"PT"}}}}]
+
+def _bgr(sid, r, g, b):
+    return [{"updatePageProperties":{"objectId":sid,
+        "pageProperties":{"pageBackgroundFill":{"solidFill":{"color":{"rgbColor":{"red":r,"green":g,"blue":b}}}}},
+        "fields":"pageBackgroundFill"}}]
+
+def _ensure_slides(svc, n):
+    ids = _get_slide_ids(svc)
+    while len(ids) < n:
+        svc.presentations().batchUpdate(presentationId=SLIDES_PRESENTATION_ID,
+            body={"requests":[{"appendSlide":{"slideLayoutReference":{"predefinedLayout":"BLANK"}}}]}).execute()
+        ids = _get_slide_ids(svc)
+    return ids[:n]
+
+def exportar_slides(data_ini, data_fim, total_rec, ec_m, mp_m,
+                    m_mes, ec_p, mp_p, df_meta, ano_atual, mes_atual):
+    svc_s = _slides_service()
+    svc_d = _drive_service()
+    if svc_s is None:
+        return False, "Service Account nao configurada ou Slides API nao ativada."
+    periodo = f"{data_ini.strftime('%d/%m/%Y')} -> {data_fim.strftime('%d/%m/%Y')}"
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    BG=(0.031,0.047,0.078); W=(0.886,0.910,0.941); G=(0.580,0.639,0.718)
+    BLUE=(0.231,0.431,1.0); GRN=(0.063,0.725,0.506); AMB=(0.961,0.620,0.043)
+    sids = _ensure_slides(svc_s, 6)
+    reqs = []
+    # Slide 1 - Capa
+    _clear_slide(svc_s, sids[0])
+    reqs += _bgr(sids[0],*BG)
+    reqs += _tb(sids[0],"Grupo Seculus",40,90,620,55,fs=34,bold=True,color=W)
+    reqs += _tb(sids[0],"Sales Intelligence Dashboard",40,152,620,36,fs=18,color=BLUE)
+    reqs += _tb(sids[0],f"Periodo: {periodo}",40,220,620,32,fs=15,color=W)
+    reqs += _tb(sids[0],now_str,40,265,620,26,fs=10,color=G)
+    # Slide 2 - KPIs
+    _clear_slide(svc_s, sids[1])
+    reqs += _bgr(sids[1],*BG)
+    reqs += _tb(sids[1],"KPIs Consolidados",30,18,660,30,fs=16,bold=True,color=W)
+    reqs += _tb(sids[1],periodo,30,48,660,20,fs=9,color=G)
+    kpis_data=[("Receita Total",brl(total_rec)),("E-commerce",brl(ec_m["receita"])),
+               ("Marketplace",brl(mp_m["receita"])),("NFs EC",f"{ec_m['total']:,}"),
+               ("NFs MKT",f"{mp_m['total']:,}"),("Ticket EC",brl(ec_m["ticket"]))]
+    for i,(lbl,val) in enumerate(kpis_data):
+        x=30+(i%3)*233; y=80+(i//3)*90
+        reqs += _tb(sids[1],lbl,x,y,224,22,fs=9,color=G)
+        reqs += _tb(sids[1],val,x,y+24,224,34,fs=20,bold=True,color=W)
+    if not df_meta.empty and m_mes.get("meta_total",0)>0:
+        pct=min(total_rec/m_mes["meta_total"]*100,100)
+        cor=GRN if pct>=100 else (AMB if pct>=70 else (1.0,0.247,0.369))
+        reqs += _tb(sids[1],f"Meta: {brl(m_mes['meta_total'])}   Realizado: {brl(total_rec)}   {pct:.1f}%",
+                    30,340,660,28,fs=12,bold=True,color=cor)
+    # Slides 3-6 - Charts
+    chart_defs=[]
+    if not ec_p.empty or not mp_p.empty:
+        fig3=go.Figure()
+        for df_ch,nm,cr in [(ec_p,"E-commerce","#3b6fff"),(mp_p,"Marketplace","#f59e0b")]:
+            if not df_ch.empty:
+                ts=df_ch.groupby("data")["receita"].sum().reset_index()
+                fig3.add_trace(go.Scatter(x=ts["data"],y=ts["receita"],name=nm,mode="lines",
+                    fill="tozeroy",line=dict(color=cr,width=2)))
+        fig3.update_layout(paper_bgcolor="#080c14",plot_bgcolor="#080c14",font=dict(color="#94a3b8"),
+            title="Evolucao de Receita",title_font=dict(color="#f1f5f9"),margin=dict(l=20,r=20,t=40,b=20))
+        chart_defs.append((sids[2],"Receita por Canal",fig3))
+    if not ec_p.empty:
+        em=ec_p.groupby("marca")["receita"].sum().reset_index()
+        fig4=px.bar(em,x="marca",y="receita",color="marca",
+            color_discrete_map={"Seculus":"#3b6fff","Mondaine":"#f59e0b","Timex":"#10b981","E-time":"#f43f5e"},
+            title="E-commerce por Marca")
+        fig4.update_layout(paper_bgcolor="#080c14",plot_bgcolor="#080c14",font=dict(color="#94a3b8"),
+            title_font=dict(color="#f1f5f9"),showlegend=False,margin=dict(l=20,r=20,t=40,b=20))
+        chart_defs.append((sids[3],"EC por Marca",fig4))
+    if not mp_p.empty:
+        mm=mp_p.groupby("MARKETPLACE")["receita"].sum().reset_index()
+        fig5=px.bar(mm,x="MARKETPLACE",y="receita",color="MARKETPLACE",title="Marketplace")
+        fig5.update_layout(paper_bgcolor="#080c14",plot_bgcolor="#080c14",font=dict(color="#94a3b8"),
+            title_font=dict(color="#f1f5f9"),showlegend=False,margin=dict(l=20,r=20,t=40,b=20))
+        chart_defs.append((sids[4],"Marketplace",fig5))
+    if not df_meta.empty:
+        df_a=df_meta[df_meta["mes_dt"].dt.year==ano_atual].copy()
+        df_a["ml"]=df_a["mes_dt"].dt.strftime("%b")
+        fig6=go.Figure([
+            go.Bar(name="Meta",x=df_a["ml"],y=df_a["META TOTAL"],marker_color="rgba(100,116,139,.4)"),
+            go.Bar(name="Realizado",x=df_a["ml"],y=df_a["Realizado REAL TOTAL"],marker_color="#10b981")])
+        fig6.update_layout(barmode="group",paper_bgcolor="#080c14",plot_bgcolor="#080c14",
+            font=dict(color="#94a3b8"),title="Meta vs Realizado",
+            title_font=dict(color="#f1f5f9"),margin=dict(l=20,r=20,t=40,b=20))
+        chart_defs.append((sids[5],"Metas Anuais",fig6))
+    for sid_c,title,fig in chart_defs:
+        _clear_slide(svc_s,sid_c)
+        reqs += _bgr(sid_c,*BG)
+        reqs += _tb(sid_c,title,30,14,660,28,fs=15,bold=True,color=W)
+        reqs += _tb(sid_c,periodo,30,42,660,18,fs=9,color=G)
+        if svc_d:
+            b64=_fig_to_png_b64(fig)
+            if b64:
+                url=_upload_img_drive(b64,f"{title}.png",svc_d)
+                if url: reqs += _imgr(sid_c,url,30,68,660,310)
+    for i in range(0,len(reqs),50):
+        svc_s.presentations().batchUpdate(presentationId=SLIDES_PRESENTATION_ID,
+            body={"requests":reqs[i:i+50]}).execute()
+    return True, f"https://docs.google.com/presentation/d/{SLIDES_PRESENTATION_ID}/edit"
+
 
 @st.cache_data(ttl=270)
 def load_url(url: str, tipo: str, token: str = "") -> tuple:
@@ -1181,9 +1365,9 @@ ec_pa_ec = fdt(df_ec, ini_ant, fim_ant) if not df_ec.empty else pd.DataFrame()
 ec_fat_a = ec_pa_ec[ec_pa_ec["faturado"]] if not ec_pa_ec.empty else pd.DataFrame()
 
 st.markdown("---")
-tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod, tab_acessos, tab_camp = st.tabs([
+tab_geral, tab_metas, tab_ec_tab, tab_mp_tab, tab_prod, tab_acessos, tab_camp, tab_export = st.tabs([
     "📊 Visão Geral", "🎯 Metas", "🛒 E-commerce", "🏪 Marketplace",
-    "🏆 Produtos & SKUs", "📈 Acessos", "📣 Campanhas",
+    "🏆 Produtos & SKUs", "📈 Acessos", "📣 Campanhas", "📤 Exportar",
 ])
 
 with tab_geral:
@@ -2338,6 +2522,63 @@ with tab_camp:
             st.download_button("📥 Exportar Campanhas",
                                data=df_ca_f.to_csv(index=False).encode("utf-8"),
                                file_name="campanhas.csv", mime="text/csv")
+
+
+with tab_export:
+    st.markdown(f"""
+    <div class='info'>
+      🎯 <strong>Integração com Google Slides</strong><br>
+      Clique em <strong>Atualizar Apresentação</strong> para exportar os dados do período selecionado
+      diretamente para a apresentação fixada no Google Slides.<br><br>
+      📎 <a href="https://docs.google.com/presentation/d/{SLIDES_PRESENTATION_ID}/edit"
+           target="_blank" style="color:#3b6fff;">Abrir apresentação ↗</a>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_btn, col_info = st.columns([1, 2])
+
+    with col_btn:
+        if st.button("🔄 Atualizar Apresentação", use_container_width=True, type="primary"):
+            with st.spinner("Gerando gráficos e atualizando slides..."):
+                try:
+                    _m_mes_exp = m_mes if not df_meta.empty else {"meta_total":0}
+                    ok, msg = exportar_slides(
+                        data_ini=data_ini, data_fim=data_fim,
+                        total_rec=total_rec, ec_m=ec_m, mp_m=mp_m,
+                        m_mes=_m_mes_exp, ec_p=ec_p, mp_p=mp_p,
+                        df_meta=df_meta if not df_meta.empty else pd.DataFrame(),
+                        ano_atual=ano_atual, mes_atual=mes_atual,
+                    )
+                    if ok:
+                        st.success("✅ Apresentação atualizada!")
+                        st.markdown(
+                            f"<a href='{msg}' target='_blank' style='text-decoration:none;'>"
+                            f"<div style='margin-top:10px;background:#3b6fff;color:white;padding:10px 18px;"
+                            f"border-radius:8px;text-align:center;font-weight:600;'>"
+                            f"🔗 Abrir no Google Slides</div></a>",
+                            unsafe_allow_html=True)
+                    else:
+                        st.error(f"❌ {msg}")
+                except Exception as e:
+                    st.error(f"❌ Erro: {e}")
+
+    with col_info:
+        st.markdown("""
+**O que será atualizado:**
+- **Slide 1** — Capa com período e data de atualização
+- **Slide 2** — KPIs consolidados e painel de metas
+- **Slide 3** — Evolução de receita por canal
+- **Slide 4** — E-commerce por marca
+- **Slide 5** — Marketplace por plataforma
+- **Slide 6** — Meta vs Realizado anual
+        """)
+        if not _sa_configured():
+            st.markdown("<div class='warn'>⚠️ Service Account não configurada.</div>", unsafe_allow_html=True)
+        elif not HAS_GAPI:
+            st.markdown("<div class='warn'>⚠️ Adicione <code>google-api-python-client</code> ao requirements.txt.</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='info'>🔐 Pronto para exportar.</div>", unsafe_allow_html=True)
 
 
 st.markdown("---")
