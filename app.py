@@ -1360,17 +1360,17 @@ with tab_geral:
         _units  = (_all_nf.groupby(["data","marca"])
                    .agg(itens=("itens","sum")).reset_index())
 
-        # Projection setup
-        _hoje_u      = datetime.today().date()
-        _dias_decor  = max((data_fim - data_ini).days + 1, 1)
-        _fim_mes_u   = date(_hoje_u.year, _hoje_u.month,
-                            _cal3.monthrange(_hoje_u.year, _hoje_u.month)[1])
-        _dias_proj   = (_fim_mes_u - data_fim).days  # remaining days after selected end
-        _proj_dates  = [data_fim + timedelta(days=i+1) for i in range(_dias_proj)]
+        _hoje_u     = datetime.today().date()
+        _fim_mes_u  = date(_hoje_u.year, _hoje_u.month,
+                           _cal3.monthrange(_hoje_u.year, _hoje_u.month)[1])
+        # Split: actual data up to today, projection from today to end of month
+        _dias_decor = max((_hoje_u - data_ini).days + 1, 1)
+        _dias_proj  = max((_fim_mes_u - _hoje_u).days, 0)
+        _proj_dates = [pd.Timestamp(_hoje_u + timedelta(days=i+1)) for i in range(_dias_proj)]
 
         fig_units = go.Figure()
         for marca in _MARCAS_PRINCIPAIS:
-            _m = _units[_units["marca"] == marca]
+            _m = _units[_units["marca"] == marca].sort_values("data")
             if _m.empty:
                 continue
             cor = COR_MARCA.get(marca, "#64748b")
@@ -1382,29 +1382,30 @@ with tab_geral:
                 marker=dict(size=5, color=cor),
                 legendgroup=marca,
             ))
-            # Projection: daily avg × remaining days
+            # Projection: daily avg extrapolated forward
             if _proj_dates:
-                _media_u = float(_m["itens"].sum()) / _dias_decor
+                _media_u  = float(_m["itens"].sum()) / _dias_decor
                 _last_val = float(_m.iloc[-1]["itens"])
-                _proj_y   = [_last_val + _media_u * (i + 1) for i in range(len(_proj_dates))]
-                # anchor point = last actual value
-                proj_x = [_m.iloc[-1]["data"]] + [pd.Timestamp(d) for d in _proj_dates]
-                proj_y = [_last_val] + _proj_y
+                _anchor_x = _m.iloc[-1]["data"]
+                proj_x = [_anchor_x] + _proj_dates
+                proj_y = [_last_val] + [_media_u] * len(_proj_dates)
                 fig_units.add_trace(go.Scatter(
                     x=proj_x, y=proj_y,
-                    name=f"{marca} (projeção)",
+                    name=f"{marca} (proj.)",
                     mode="lines",
-                    line=dict(color=cor, width=1.5, dash="dot"),
+                    line=dict(color=cor, width=1.8, dash="dot"),
                     legendgroup=marca,
-                    showlegend=True,
+                    opacity=0.6,
                 ))
 
-        fig_units.add_vline(
-            x=pd.Timestamp(data_fim).timestamp() * 1000,
-            line_dash="dash", line_color="#475569", line_width=1,
-            annotation_text="hoje", annotation_font_color="#94a3b8",
-            annotation_position="top right",
-        )
+        if _dias_proj > 0:
+            fig_units.add_vline(
+                x=pd.Timestamp(_hoje_u).value / 1e6,
+                line_dash="dash", line_color="#475569", line_width=1,
+                annotation_text="hoje",
+                annotation_font_color="#94a3b8",
+                annotation_position="top right",
+            )
         fig_units.update_layout(**L(yaxis=dict(
             title="Unidades", gridcolor="#1a2540", zeroline=False)))
         st.plotly_chart(fig_units, use_container_width=True)
