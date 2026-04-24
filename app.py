@@ -1636,13 +1636,39 @@ with tab_ec_tab:
         ea1, ea2 = st.columns(2)
         with ea1:
             sh("Receita por Marca")
+            import calendar as _cal_ec
+            _hoje_ec    = datetime.today().date()
+            _dias_decor_ec = max((_hoje_ec - data_ini).days + 1, 1)
+            _dias_mes_ec   = _cal_ec.monthrange(data_ini.year, data_ini.month)[1]
             em2 = ec_p.groupby("marca")["receita"].sum().reset_index().sort_values("receita", ascending=False)
-            fig_em2 = px.bar(em2, x="marca", y="receita",
-                             color="marca", color_discrete_map=COR_MARCA,
-                             labels={"receita":"Receita (R$)","marca":""},
-                             text=em2["receita"].map(lambda x: brl(x)))
-            fig_em2.update_traces(textposition="outside")
-            fig_em2.update_layout(**L())
+            em2["media_dia"]  = em2["receita"] / _dias_decor_ec
+            em2["projecao"]   = em2["media_dia"] * _dias_mes_ec
+            em2["falta_proj"] = (em2["projecao"] - em2["receita"]).clip(lower=0)
+
+            fig_em2 = go.Figure()
+            for _, row in em2.iterrows():
+                cor = COR_MARCA.get(row["marca"], "#3b6fff")
+                # Realizado
+                fig_em2.add_trace(go.Bar(
+                    x=[row["marca"]], y=[row["receita"]],
+                    name="Realizado", marker_color=cor,
+                    legendgroup="real", showlegend=(_ == em2.iloc[0].name),
+                    text=[brl(row["receita"])], textposition="inside",
+                    textfont=dict(size=11),
+                ))
+                # Projeção (stacked on top)
+                fig_em2.add_trace(go.Bar(
+                    x=[row["marca"]], y=[row["falta_proj"]],
+                    name="Projeção", marker_color=cor,
+                    marker_opacity=0.3,
+                    marker_pattern_shape="/",
+                    legendgroup="proj", showlegend=(_ == em2.iloc[0].name),
+                    text=[f"≈ {brl(row['projecao'])}"] if row["falta_proj"] > 0 else [""],
+                    textposition="outside",
+                    textfont=dict(size=10, color="#94a3b8"),
+                ))
+            fig_em2.update_layout(barmode="stack", **L(
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8", size=11))))
             st.plotly_chart(fig_em2, use_container_width=True)
         with ea2:
             sh("Share por Marca")
