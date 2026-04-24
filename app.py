@@ -1292,31 +1292,6 @@ with tab_geral:
             f"Marketplace <strong>{pmp:.1f}%</strong> (R$ {mp_m['receita']:,.0f})</div>",
             unsafe_allow_html=True)
 
-    if not mp_ecom_all.empty or not mp_mkt_all.empty:
-        _dias_periodo = max((data_fim - data_ini).days + 1, 1)
-        sh("Resumo por Marca")
-        MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
-        cols_rc = st.columns(len(MARCAS_ECOM))
-        for idx, marca in enumerate(MARCAS_ECOM):
-            df_m    = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
-            notas   = int(df_m["nota"].nunique())      if not df_m.empty else 0
-            itens   = int(df_m["itens"].round().sum()) if not df_m.empty else 0
-            receita = float(df_m["receita"].sum())     if not df_m.empty else 0
-            ticket  = receita / notas if notas > 0 else 0
-            media_d = receita / _dias_periodo
-            cor     = COR_MARCA.get(marca, "#3b6fff")
-            with cols_rc[idx]:
-                st.markdown(f"""
-                <div class="rc">
-                  <p class="rc-title" style="color:{cor};">{marca}</p>
-                  <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
-                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
-                  <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
-                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
-                  <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-
     col_ev, col_sh = st.columns([3, 1])
     with col_ev:
         sh("Evolução de Receita")
@@ -1355,57 +1330,21 @@ with tab_geral:
     _all_nf = pd.concat([df for df in [ec_p, mp_p] if not df.empty and "marca" in df.columns],
                         ignore_index=True) if (not ec_p.empty or not mp_p.empty) else pd.DataFrame()
     if not _all_nf.empty:
-        import calendar as _cal3
         _all_nf = _all_nf[_all_nf["marca"].isin(_MARCAS_PRINCIPAIS)]
         _units  = (_all_nf.groupby(["data","marca"])
                    .agg(itens=("itens","sum")).reset_index())
-
-        _hoje_u     = datetime.today().date()
-        _fim_mes_u  = date(_hoje_u.year, _hoje_u.month,
-                           _cal3.monthrange(_hoje_u.year, _hoje_u.month)[1])
-        # Split: actual data up to today, projection from today to end of month
-        _dias_decor = max((_hoje_u - data_ini).days + 1, 1)
-        _dias_proj  = max((_fim_mes_u - _hoje_u).days, 0)
-        _proj_dates = [pd.Timestamp(_hoje_u + timedelta(days=i+1)) for i in range(_dias_proj)]
-
         fig_units = go.Figure()
         for marca in _MARCAS_PRINCIPAIS:
             _m = _units[_units["marca"] == marca].sort_values("data")
             if _m.empty:
                 continue
             cor = COR_MARCA.get(marca, "#64748b")
-            # Actual line
             fig_units.add_trace(go.Scatter(
                 x=_m["data"], y=_m["itens"], name=marca,
                 mode="lines+markers",
                 line=dict(color=cor, width=2.5, shape="spline", smoothing=1.0),
                 marker=dict(size=5, color=cor),
-                legendgroup=marca,
             ))
-            # Projection: daily avg extrapolated forward
-            if _proj_dates:
-                _media_u  = float(_m["itens"].sum()) / _dias_decor
-                _last_val = float(_m.iloc[-1]["itens"])
-                _anchor_x = _m.iloc[-1]["data"]
-                proj_x = [_anchor_x] + _proj_dates
-                proj_y = [_last_val] + [_media_u] * len(_proj_dates)
-                fig_units.add_trace(go.Scatter(
-                    x=proj_x, y=proj_y,
-                    name=f"{marca} (proj.)",
-                    mode="lines",
-                    line=dict(color=cor, width=1.8, dash="dot"),
-                    legendgroup=marca,
-                    opacity=0.6,
-                ))
-
-        if _dias_proj > 0:
-            fig_units.add_vline(
-                x=pd.Timestamp(_hoje_u).value / 1e6,
-                line_dash="dash", line_color="#475569", line_width=1,
-                annotation_text="hoje",
-                annotation_font_color="#94a3b8",
-                annotation_position="top right",
-            )
         fig_units.update_layout(**L(yaxis=dict(
             title="Unidades", gridcolor="#1a2540", zeroline=False)))
         st.plotly_chart(fig_units, use_container_width=True)
@@ -1631,6 +1570,30 @@ with tab_ec_tab:
                 f"<span style='color:{_cor_ec};'>⚡ <strong>Necessário/dia:</strong> {brl(_nd_ec)}</span>"
                 f"<span>📈 <strong>Média atual/dia:</strong> {brl(_med_ec)}</span>"
                 f"</div>", unsafe_allow_html=True)
+
+        sh("Resumo por Marca")
+        _dias_periodo_ec = max((data_fim - data_ini).days + 1, 1)
+        MARCAS_ECOM = ["Seculus", "Mondaine", "Timex", "E-time"]
+        cols_rc = st.columns(len(MARCAS_ECOM))
+        for idx, marca in enumerate(MARCAS_ECOM):
+            df_m    = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
+            notas   = int(df_m["nota"].nunique())      if not df_m.empty else 0
+            itens   = int(df_m["itens"].round().sum()) if not df_m.empty else 0
+            receita = float(df_m["receita"].sum())     if not df_m.empty else 0
+            ticket  = receita / notas if notas > 0 else 0
+            media_d = receita / _dias_periodo_ec
+            cor     = COR_MARCA.get(marca, "#3b6fff")
+            with cols_rc[idx]:
+                st.markdown(f"""
+                <div class="rc">
+                  <p class="rc-title" style="color:{cor};">{marca}</p>
+                  <div class="rc-row"><span>Notas fiscais</span><span class="rc-val">{notas:,}</span></div>
+                  <div class="rc-row"><span>Itens faturados</span><span class="rc-val"><span class="rc-badge rc-green">{itens:,}</span></span></div>
+                  <div class="rc-row"><span>Ticket médio NF</span><span class="rc-val">{brl(ticket)}</span></div>
+                  <div class="rc-row"><span>Receita faturada</span><span class="rc-val">{brl(receita)}</span></div>
+                  <div class="rc-row"><span>Média diária</span><span class="rc-val">{brl(media_d)}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         ea1, ea2 = st.columns(2)
