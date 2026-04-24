@@ -1646,24 +1646,23 @@ with tab_ec_tab:
             em2["falta_proj"] = (em2["projecao"] - em2["receita"]).clip(lower=0)
 
             fig_em2 = go.Figure()
-            for _, row in em2.iterrows():
-                cor = COR_MARCA.get(row["marca"], "#3b6fff")
-                # Realizado
+            for i, row in enumerate(em2.itertuples()):
+                cor = COR_MARCA.get(row.marca, "#3b6fff")
+                is_first = (i == 0)
                 fig_em2.add_trace(go.Bar(
-                    x=[row["marca"]], y=[row["receita"]],
+                    x=[row.marca], y=[row.receita],
                     name="Realizado", marker_color=cor,
-                    legendgroup="real", showlegend=(_ == em2.iloc[0].name),
-                    text=[brl(row["receita"])], textposition="inside",
+                    legendgroup="real", showlegend=is_first,
+                    text=[brl(row.receita)], textposition="inside",
                     textfont=dict(size=11),
                 ))
-                # Projeção (stacked on top)
                 fig_em2.add_trace(go.Bar(
-                    x=[row["marca"]], y=[row["falta_proj"]],
+                    x=[row.marca], y=[row.falta_proj],
                     name="Projeção", marker_color=cor,
                     marker_opacity=0.3,
                     marker_pattern_shape="/",
-                    legendgroup="proj", showlegend=(_ == em2.iloc[0].name),
-                    text=[f"≈ {brl(row['projecao'])}"] if row["falta_proj"] > 0 else [""],
+                    legendgroup="proj", showlegend=is_first,
+                    text=[f"≈ {brl(row.projecao)}"] if row.falta_proj > 0 else [""],
                     textposition="outside",
                     textfont=dict(size=10, color="#94a3b8"),
                 ))
