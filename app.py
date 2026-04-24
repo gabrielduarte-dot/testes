@@ -622,157 +622,232 @@ def _drive_service():
 
 def _fig_to_png_b64(fig) -> str:
     try:
-        return base64.b64encode(fig.to_image(format="png", width=900, height=420, scale=2)).decode("utf-8")
+        return base64.b64encode(
+            fig.to_image(format="png", width=960, height=440, scale=2)
+        ).decode("utf-8")
     except Exception: return ""
 
-def _upload_img_drive(b64_data, filename, drive_svc):
+def _upload_img_drive(b64_data: str, filename: str, drive_svc) -> str:
+    """Upload PNG to Drive, return URL usable by Slides API."""
     try:
         from googleapiclient.http import MediaIoBaseUpload
         media = io.BytesIO(base64.b64decode(b64_data))
         f = drive_svc.files().create(
             body={"name": filename, "mimeType": "image/png"},
-            media_body=MediaIoBaseUpload(media, mimetype="image/png"), fields="id").execute()
+            media_body=MediaIoBaseUpload(media, mimetype="image/png"),
+            fields="id"
+        ).execute()
         fid = f.get("id")
-        drive_svc.permissions().create(fileId=fid, body={"type":"anyone","role":"reader"}).execute()
-        return f"https://drive.google.com/uc?id={fid}"
-    except Exception: return ""
+        # Make public
+        drive_svc.permissions().create(
+            fileId=fid, body={"type": "anyone", "role": "reader"}
+        ).execute()
+        # lh3.googleusercontent.com is the URL format accepted by Slides createImage
+        return f"https://lh3.googleusercontent.com/d/{fid}"
+    except Exception:
+        return ""
 
-def _get_slide_ids(svc):
+def _get_slide_ids(svc) -> list:
     try:
         p = svc.presentations().get(presentationId=SLIDES_PRESENTATION_ID).execute()
         return [s["objectId"] for s in p.get("slides", [])]
     except Exception: return []
 
-def _clear_slide(svc, sid):
+def _clear_data_elements(svc, sid: str):
+    """Delete only DATA_ elements, preserving BRAND_ elements."""
     try:
         p = svc.presentations().get(presentationId=SLIDES_PRESENTATION_ID).execute()
         reqs = []
         for s in p.get("slides", []):
-            if s["objectId"] == sid:
-                for e in s.get("pageElements", []): reqs.append({"deleteObject":{"objectId":e["objectId"]}})
+            if s["objectId"] != sid: continue
+            for e in s.get("pageElements", []):
+                eid = e.get("objectId", "")
+                if not eid.startswith("BRAND_"):
+                    reqs.append({"deleteObject": {"objectId": eid}})
         if reqs:
-            svc.presentations().batchUpdate(presentationId=SLIDES_PRESENTATION_ID, body={"requests":reqs}).execute()
+            svc.presentations().batchUpdate(
+                presentationId=SLIDES_PRESENTATION_ID,
+                body={"requests": reqs}
+            ).execute()
     except Exception: pass
 
-def _tb(sid, text, x, y, w, h, fs=14, bold=False, color=(1,1,1)):
-    eid = f"tb{abs(hash(sid+text+str(x)+str(y)))%9999999}"
-    r,g,b = color
+def _tb(sid: str, text: str, x: float, y: float, w: float, h: float,
+        fs: int = 14, bold: bool = False, color: tuple = (1,1,1)) -> list:
+    """Create a DATA_ text box."""
+    eid = f"DATA_tb_{abs(hash(sid+text+str(x)+str(y))) % 9999999}"
+    r, g, b = color
     return [
-        {"createShape":{"objectId":eid,"shapeType":"TEXT_BOX","elementProperties":{"pageObjectId":sid,
-            "size":{"width":{"magnitude":w,"unit":"PT"},"height":{"magnitude":h,"unit":"PT"}},
-            "transform":{"scaleX":1,"scaleY":1,"translateX":x,"translateY":y,"unit":"PT"}}}},
-        {"insertText":{"objectId":eid,"text":text}},
-        {"updateTextStyle":{"objectId":eid,"textRange":{"type":"ALL"},"style":{"bold":bold,
-            "fontSize":{"magnitude":fs,"unit":"PT"},
-            "foregroundColor":{"opaqueColor":{"rgbColor":{"red":r,"green":g,"blue":b}}}},
-            "fields":"bold,fontSize,foregroundColor"}},
+        {"createShape": {"objectId": eid, "shapeType": "TEXT_BOX",
+            "elementProperties": {"pageObjectId": sid,
+                "size": {"width": {"magnitude": w, "unit": "PT"},
+                         "height": {"magnitude": h, "unit": "PT"}},
+                "transform": {"scaleX": 1, "scaleY": 1,
+                               "translateX": x, "translateY": y, "unit": "PT"}}}},
+        {"insertText": {"objectId": eid, "text": text}},
+        {"updateTextStyle": {"objectId": eid, "textRange": {"type": "ALL"},
+            "style": {"bold": bold,
+                "fontSize": {"magnitude": fs, "unit": "PT"},
+                "foregroundColor": {"opaqueColor": {"rgbColor": {
+                    "red": r, "green": g, "blue": b}}}},
+            "fields": "bold,fontSize,foregroundColor"}},
     ]
 
-def _imgr(sid, url, x, y, w, h):
-    eid = f"im{abs(hash(sid+url+str(x)))%9999999}"
-    return [{"createImage":{"objectId":eid,"url":url,"elementProperties":{"pageObjectId":sid,
-        "size":{"width":{"magnitude":w,"unit":"PT"},"height":{"magnitude":h,"unit":"PT"}},
-        "transform":{"scaleX":1,"scaleY":1,"translateX":x,"translateY":y,"unit":"PT"}}}}]
+def _img_req(sid: str, url: str, x: float, y: float, w: float, h: float) -> list:
+    """Create a DATA_ image element."""
+    eid = f"DATA_img_{abs(hash(sid+url+str(x))) % 9999999}"
+    return [{"createImage": {"objectId": eid, "url": url,
+        "elementProperties": {"pageObjectId": sid,
+            "size": {"width": {"magnitude": w, "unit": "PT"},
+                     "height": {"magnitude": h, "unit": "PT"}},
+            "transform": {"scaleX": 1, "scaleY": 1,
+                           "translateX": x, "translateY": y, "unit": "PT"}}}}]
 
-def _bgr(sid, r, g, b):
-    return [{"updatePageProperties":{"objectId":sid,
-        "pageProperties":{"pageBackgroundFill":{"solidFill":{"color":{"rgbColor":{"red":r,"green":g,"blue":b}}}}},
-        "fields":"pageBackgroundFill"}}]
-
-def _ensure_slides(svc, n):
+def _ensure_slides(svc, n: int) -> list:
     ids = _get_slide_ids(svc)
     while len(ids) < n:
-        svc.presentations().batchUpdate(presentationId=SLIDES_PRESENTATION_ID,
-            body={"requests":[{"appendSlide":{"slideLayoutReference":{"predefinedLayout":"BLANK"}}}]}).execute()
+        svc.presentations().batchUpdate(
+            presentationId=SLIDES_PRESENTATION_ID,
+            body={"requests": [{"appendSlide": {
+                "slideLayoutReference": {"predefinedLayout": "BLANK"}}}]}
+        ).execute()
         ids = _get_slide_ids(svc)
     return ids[:n]
+
+def _batch(svc, reqs: list):
+    """Execute requests in batches of 50."""
+    for i in range(0, len(reqs), 50):
+        svc.presentations().batchUpdate(
+            presentationId=SLIDES_PRESENTATION_ID,
+            body={"requests": reqs[i:i+50]}
+        ).execute()
 
 def exportar_slides(data_ini, data_fim, total_rec, ec_m, mp_m,
                     m_mes, ec_p, mp_p, df_meta, ano_atual, mes_atual):
     svc_s = _slides_service()
     svc_d = _drive_service()
     if svc_s is None:
-        return False, "Service Account nao configurada ou Slides API nao ativada."
-    periodo = f"{data_ini.strftime('%d/%m/%Y')} -> {data_fim.strftime('%d/%m/%Y')}"
-    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
-    BG=(0.031,0.047,0.078); W=(0.886,0.910,0.941); G=(0.580,0.639,0.718)
-    BLUE=(0.231,0.431,1.0); GRN=(0.063,0.725,0.506); AMB=(0.961,0.620,0.043)
+        return False, "Service Account não configurada ou Slides API não ativada no Google Cloud."
+
+    periodo  = f"{data_ini.strftime('%d/%m/%Y')} → {data_fim.strftime('%d/%m/%Y')}"
+    now_str  = f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    # Colour palette
+    W    = (0.886, 0.910, 0.941)   # off-white
+    G    = (0.580, 0.639, 0.718)   # muted blue-grey
+    BLUE = (0.231, 0.431, 1.000)
+    GRN  = (0.063, 0.725, 0.506)
+    AMB  = (0.961, 0.620, 0.043)
+    RED  = (0.957, 0.247, 0.369)
+
     sids = _ensure_slides(svc_s, 6)
-    reqs = []
-    # Slide 1 - Capa
-    _clear_slide(svc_s, sids[0])
-    reqs += _bgr(sids[0],*BG)
-    reqs += _tb(sids[0],"Grupo Seculus",40,90,620,55,fs=34,bold=True,color=W)
-    reqs += _tb(sids[0],"Sales Intelligence Dashboard",40,152,620,36,fs=18,color=BLUE)
-    reqs += _tb(sids[0],f"Periodo: {periodo}",40,220,620,32,fs=15,color=W)
-    reqs += _tb(sids[0],now_str,40,265,620,26,fs=10,color=G)
-    # Slide 2 - KPIs
-    _clear_slide(svc_s, sids[1])
-    reqs += _bgr(sids[1],*BG)
-    reqs += _tb(sids[1],"KPIs Consolidados",30,18,660,30,fs=16,bold=True,color=W)
-    reqs += _tb(sids[1],periodo,30,48,660,20,fs=9,color=G)
-    kpis_data=[("Receita Total",brl(total_rec)),("E-commerce",brl(ec_m["receita"])),
-               ("Marketplace",brl(mp_m["receita"])),("NFs EC",f"{ec_m['total']:,}"),
-               ("NFs MKT",f"{mp_m['total']:,}"),("Ticket EC",brl(ec_m["ticket"]))]
-    for i,(lbl,val) in enumerate(kpis_data):
-        x=30+(i%3)*233; y=80+(i//3)*90
-        reqs += _tb(sids[1],lbl,x,y,224,22,fs=9,color=G)
-        reqs += _tb(sids[1],val,x,y+24,224,34,fs=20,bold=True,color=W)
-    if not df_meta.empty and m_mes.get("meta_total",0)>0:
-        pct=min(total_rec/m_mes["meta_total"]*100,100)
-        cor=GRN if pct>=100 else (AMB if pct>=70 else (1.0,0.247,0.369))
-        reqs += _tb(sids[1],f"Meta: {brl(m_mes['meta_total'])}   Realizado: {brl(total_rec)}   {pct:.1f}%",
-                    30,340,660,28,fs=12,bold=True,color=cor)
-    # Slides 3-6 - Charts
-    chart_defs=[]
+
+    # ── SLIDE 1: Capa
+    _clear_data_elements(svc_s, sids[0])
+    r1 = []
+    r1 += _tb(sids[0], "Grupo Seculus",              40,  80, 620, 52, fs=34, bold=True, color=W)
+    r1 += _tb(sids[0], "Sales Intelligence Dashboard", 40, 140, 620, 34, fs=18, color=BLUE)
+    r1 += _tb(sids[0], f"Período: {periodo}",         40, 210, 620, 30, fs=15, color=W)
+    r1 += _tb(sids[0], now_str,                        40, 252, 620, 24, fs=10, color=G)
+    _batch(svc_s, r1)
+
+    # ── SLIDE 2: KPIs + Meta
+    _clear_data_elements(svc_s, sids[1])
+    r2 = []
+    r2 += _tb(sids[1], "KPIs Consolidados", 30, 16, 660, 28, fs=16, bold=True, color=W)
+    r2 += _tb(sids[1], periodo,              30, 44, 660, 18, fs=9,  color=G)
+    kpis = [
+        ("Receita Total",  brl(total_rec)),
+        ("E-commerce",     brl(ec_m["receita"])),
+        ("Marketplace",    brl(mp_m["receita"])),
+        ("NFs EC",         f"{ec_m['total']:,}"),
+        ("NFs Mkt",        f"{mp_m['total']:,}"),
+        ("Ticket EC",      brl(ec_m["ticket"])),
+    ]
+    for i, (lbl, val) in enumerate(kpis):
+        x = 30 + (i % 3) * 233
+        y = 76 + (i // 3) * 90
+        r2 += _tb(sids[1], lbl, x, y,      224, 20, fs=9,  color=G)
+        r2 += _tb(sids[1], val, x, y + 22, 224, 32, fs=20, bold=True, color=W)
+    if not df_meta.empty and m_mes.get("meta_total", 0) > 0:
+        pct = min(total_rec / m_mes["meta_total"] * 100, 100)
+        cor = GRN if pct >= 100 else (AMB if pct >= 70 else RED)
+        r2 += _tb(sids[1],
+            f"Meta: {brl(m_mes['meta_total'])}   Realizado: {brl(total_rec)}   {pct:.1f}%",
+            30, 340, 660, 26, fs=12, bold=True, color=cor)
+    _batch(svc_s, r2)
+
+    # ── SLIDES 3–6: Charts
+    chart_defs = []
+
+    # Slide 3 — Evolução de receita
     if not ec_p.empty or not mp_p.empty:
-        fig3=go.Figure()
-        for df_ch,nm,cr in [(ec_p,"E-commerce","#3b6fff"),(mp_p,"Marketplace","#f59e0b")]:
+        fig3 = go.Figure()
+        for df_ch, nm, cr in [(ec_p, "E-commerce", "#3b6fff"), (mp_p, "Marketplace", "#f59e0b")]:
             if not df_ch.empty:
-                ts=df_ch.groupby("data")["receita"].sum().reset_index()
-                fig3.add_trace(go.Scatter(x=ts["data"],y=ts["receita"],name=nm,mode="lines",
-                    fill="tozeroy",line=dict(color=cr,width=2)))
-        fig3.update_layout(paper_bgcolor="#080c14",plot_bgcolor="#080c14",font=dict(color="#94a3b8"),
-            title="Evolucao de Receita",title_font=dict(color="#f1f5f9"),margin=dict(l=20,r=20,t=40,b=20))
-        chart_defs.append((sids[2],"Receita por Canal",fig3))
+                ts = df_ch.groupby("data")["receita"].sum().reset_index()
+                fig3.add_trace(go.Scatter(x=ts["data"], y=ts["receita"], name=nm,
+                    mode="lines", fill="tozeroy", line=dict(color=cr, width=2.5)))
+        fig3.update_layout(paper_bgcolor="#080c14", plot_bgcolor="#080c14",
+            font=dict(color="#94a3b8", family="DM Sans"),
+            title_font=dict(color="#f1f5f9"), margin=dict(l=20,r=20,t=50,b=20),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8")))
+        chart_defs.append((sids[2], "Evolução de Receita por Canal", fig3))
+
+    # Slide 4 — EC por marca
     if not ec_p.empty:
-        em=ec_p.groupby("marca")["receita"].sum().reset_index()
-        fig4=px.bar(em,x="marca",y="receita",color="marca",
-            color_discrete_map={"Seculus":"#3b6fff","Mondaine":"#f59e0b","Timex":"#10b981","E-time":"#f43f5e"},
-            title="E-commerce por Marca")
-        fig4.update_layout(paper_bgcolor="#080c14",plot_bgcolor="#080c14",font=dict(color="#94a3b8"),
-            title_font=dict(color="#f1f5f9"),showlegend=False,margin=dict(l=20,r=20,t=40,b=20))
-        chart_defs.append((sids[3],"EC por Marca",fig4))
+        em = ec_p.groupby("marca")["receita"].sum().reset_index().sort_values("receita", ascending=False)
+        fig4 = px.bar(em, x="marca", y="receita", color="marca",
+            color_discrete_map={"Seculus":"#3b6fff","Mondaine":"#f59e0b",
+                                 "Timex":"#10b981","E-time":"#f43f5e"},
+            text=em["receita"].map(brl))
+        fig4.update_traces(textposition="outside")
+        fig4.update_layout(paper_bgcolor="#080c14", plot_bgcolor="#080c14",
+            font=dict(color="#94a3b8"), showlegend=False,
+            margin=dict(l=20,r=20,t=50,b=20))
+        chart_defs.append((sids[3], "E-commerce por Marca", fig4))
+
+    # Slide 5 — Marketplace
     if not mp_p.empty:
-        mm=mp_p.groupby("MARKETPLACE")["receita"].sum().reset_index()
-        fig5=px.bar(mm,x="MARKETPLACE",y="receita",color="MARKETPLACE",title="Marketplace")
-        fig5.update_layout(paper_bgcolor="#080c14",plot_bgcolor="#080c14",font=dict(color="#94a3b8"),
-            title_font=dict(color="#f1f5f9"),showlegend=False,margin=dict(l=20,r=20,t=40,b=20))
-        chart_defs.append((sids[4],"Marketplace",fig5))
+        mm = mp_p.groupby("MARKETPLACE")["receita"].sum().reset_index().sort_values("receita", ascending=False)
+        fig5 = px.bar(mm, x="MARKETPLACE", y="receita", color="MARKETPLACE",
+            text=mm["receita"].map(brl))
+        fig5.update_traces(textposition="outside")
+        fig5.update_layout(paper_bgcolor="#080c14", plot_bgcolor="#080c14",
+            font=dict(color="#94a3b8"), showlegend=False,
+            margin=dict(l=20,r=20,t=50,b=20))
+        chart_defs.append((sids[4], "Marketplace por Plataforma", fig5))
+
+    # Slide 6 — Meta vs Realizado
     if not df_meta.empty:
-        df_a=df_meta[df_meta["mes_dt"].dt.year==ano_atual].copy()
-        df_a["ml"]=df_a["mes_dt"].dt.strftime("%b")
-        fig6=go.Figure([
-            go.Bar(name="Meta",x=df_a["ml"],y=df_a["META TOTAL"],marker_color="rgba(100,116,139,.4)"),
-            go.Bar(name="Realizado",x=df_a["ml"],y=df_a["Realizado REAL TOTAL"],marker_color="#10b981")])
-        fig6.update_layout(barmode="group",paper_bgcolor="#080c14",plot_bgcolor="#080c14",
-            font=dict(color="#94a3b8"),title="Meta vs Realizado",
-            title_font=dict(color="#f1f5f9"),margin=dict(l=20,r=20,t=40,b=20))
-        chart_defs.append((sids[5],"Metas Anuais",fig6))
-    for sid_c,title,fig in chart_defs:
-        _clear_slide(svc_s,sid_c)
-        reqs += _bgr(sid_c,*BG)
-        reqs += _tb(sid_c,title,30,14,660,28,fs=15,bold=True,color=W)
-        reqs += _tb(sid_c,periodo,30,42,660,18,fs=9,color=G)
+        df_a = df_meta[df_meta["mes_dt"].dt.year == ano_atual].copy()
+        df_a["ml"] = df_a["mes_dt"].dt.strftime("%b")
+        fig6 = go.Figure([
+            go.Bar(name="Meta",      x=df_a["ml"], y=df_a["META TOTAL"],
+                   marker_color="rgba(100,116,139,.35)"),
+            go.Bar(name="Realizado", x=df_a["ml"], y=df_a["Realizado REAL TOTAL"],
+                   marker_color="#10b981"),
+        ])
+        fig6.update_layout(barmode="group", paper_bgcolor="#080c14", plot_bgcolor="#080c14",
+            font=dict(color="#94a3b8"), margin=dict(l=20,r=20,t=50,b=20),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8")))
+        chart_defs.append((sids[5], "Meta vs Realizado", fig6))
+
+    # Upload and inject charts
+    for sid_c, title, fig in chart_defs:
+        _clear_data_elements(svc_s, sid_c)
+        rc = []
+        rc += _tb(sid_c, title,   30, 12, 660, 26, fs=15, bold=True, color=W)
+        rc += _tb(sid_c, periodo, 30, 38, 660, 16, fs=9,  color=G)
         if svc_d:
-            b64=_fig_to_png_b64(fig)
+            b64 = _fig_to_png_b64(fig)
             if b64:
-                url=_upload_img_drive(b64,f"{title}.png",svc_d)
-                if url: reqs += _imgr(sid_c,url,30,68,660,310)
-    for i in range(0,len(reqs),50):
-        svc_s.presentations().batchUpdate(presentationId=SLIDES_PRESENTATION_ID,
-            body={"requests":reqs[i:i+50]}).execute()
-    return True, f"https://docs.google.com/presentation/d/{SLIDES_PRESENTATION_ID}/edit"
+                img_url = _upload_img_drive(b64, f"seculus_{title}.png", svc_d)
+                if img_url:
+                    rc += _img_req(sid_c, img_url, 20, 60, 680, 316)
+        _batch(svc_s, rc)
+
+    url = f"https://docs.google.com/presentation/d/{SLIDES_PRESENTATION_ID}/edit"
+    return True, url
+
 
 
 @st.cache_data(ttl=270)
