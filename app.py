@@ -194,12 +194,13 @@ IMG_EXT      = ".jpg"
 META_URL = "https://docs.google.com/spreadsheets/d/1r4WwX_UjF12weYCYn3P5D2BzAJUhXrdJ2oQk95CgupE/export?format=csv"
 
 # GIDs das abas da planilha unificada — atualizar quando o link for confirmado
-SHEET_BASE    = ""  # ID da planilha unificada (preenchido no expander)
+SHEET_BASE    = ""
 GID_NF        = "0"
 GID_EC        = "1"
 GID_METAS     = "2"
-GID_ACESSOS   = "3"
-GID_CAMPANHAS = "4"
+GID_META_INV  = "3"   # Nova aba: Meta x Investimento
+GID_ACESSOS   = "4"
+GID_CAMPANHAS = "5"
 
 COR_CLUSTER = {
     "🌳 Orgânico":        "#10b981",
@@ -340,6 +341,52 @@ def load_metas() -> pd.DataFrame:
         return df.dropna(subset=["mes_dt"])
     except Exception:
         return pd.DataFrame()
+
+_MESES_BR = {"jan":1,"fev":2,"mar":3,"abr":4,"mai":5,"jun":6,
+             "jul":7,"ago":8,"set":9,"out":10,"nov":11,"dez":12}
+
+@st.cache_data(ttl=3600)
+def load_meta_inv(url: str, token: str = "") -> pd.DataFrame:
+    try:
+        sess = requests.Session(); sess.trust_env = False
+        hdrs = {"User-Agent":"Mozilla/5.0"}
+        if token: hdrs["Authorization"] = f"Bearer {token}"
+        r = sess.get(url, timeout=20, headers=hdrs)
+        r.raise_for_status()
+        try:    text = r.content.decode("utf-8")
+        except: text = r.content.decode("latin-1")
+        df = pd.read_csv(StringIO(text), header=None, dtype=str)
+
+        def _p(s):
+            try: return float(str(s).strip().replace("R$","").replace(" ","").replace(".","").replace(",","."))
+            except: return 0.0
+
+        rows = []
+        for _, row in df.iloc[2:].iterrows():
+            mes_str = str(row.iloc[0]).strip().lower()
+            if mes_str in ("total","nan",""): continue
+            mes_num = _MESES_BR.get(mes_str[:3], 0)
+            if mes_num == 0: continue
+            rows.append({
+                "mes": mes_num, "mes_str": mes_str.capitalize(),
+                "meta_b2c":  _p(row.iloc[1]),  "meta_sec": _p(row.iloc[2]),
+                "meta_mon":  _p(row.iloc[3]),  "meta_tim": _p(row.iloc[4]),
+                "meta_eti":  _p(row.iloc[5]),  "meta_inv": _p(row.iloc[6]),
+                "meta_roas": _p(row.iloc[7]),
+                "inv_sec":   _p(row.iloc[10]), "inv_mon":  _p(row.iloc[11]),
+                "inv_tim":   _p(row.iloc[12]), "inv_eti":  _p(row.iloc[13]),
+                "inv_total": _p(row.iloc[14]),
+            })
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+def meta_inv_do_mes(df_mi: pd.DataFrame, mes: int) -> dict:
+    _e = dict(meta_b2c=0,meta_sec=0,meta_mon=0,meta_tim=0,meta_eti=0,
+              meta_inv=0,meta_roas=0,inv_sec=0,inv_mon=0,inv_tim=0,inv_eti=0,inv_total=0)
+    if df_mi.empty: return _e
+    row = df_mi[df_mi["mes"] == mes]
+    return row.iloc[0].to_dict() if not row.empty else _e
 
 def metas_do_mes(df_meta: pd.DataFrame, ano: int, mes: int) -> dict:
     row = df_meta[(df_meta["mes_dt"].dt.year == ano) & (df_meta["mes_dt"].dt.month == mes)]
@@ -879,12 +926,13 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
             "<div style='font-size:.74rem;color:#64748b;margin-top:6px;'>"
             "GIDs das abas (0=Marketplace, 1=E-commerce, 2=Metas, 3=Acessos, 4=Campanhas) "
             "— ajuste se necessário:</div>", unsafe_allow_html=True)
-        gcols = st.columns(5)
-        gid_nf  = gcols[0].text_input("Marketplace", value="0",   key="gid_nf")
-        gid_ec  = gcols[1].text_input("E-commerce",  value="1",   key="gid_ec")
-        gid_met = gcols[2].text_input("Metas",        value="2",   key="gid_met")
-        gid_ac  = gcols[3].text_input("Acessos",      value="3",   key="gid_ac")
-        gid_ca  = gcols[4].text_input("Campanhas",    value="4",   key="gid_ca")
+        gcols = st.columns(6)
+        gid_nf   = gcols[0].text_input("Marketplace",    value="0", key="gid_nf")
+        gid_ec   = gcols[1].text_input("E-commerce",     value="1", key="gid_ec")
+        gid_met  = gcols[2].text_input("Metas",          value="2", key="gid_met")
+        gid_mi   = gcols[3].text_input("Meta x Inv.",    value="3", key="gid_mi")
+        gid_ac   = gcols[4].text_input("Acessos",        value="4", key="gid_ac")
+        gid_ca   = gcols[5].text_input("Campanhas",      value="5", key="gid_ca")
 
         if st.button("Carregar Planilha", use_container_width=True, key="btn_sheet"):
             url = sheet_url.strip()
@@ -922,6 +970,7 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
 
                         gid_nf_r  = _resolve_gid(gid_nf,  ["base dashboard - marketplace","marketplace","nf","faturamento","base dashboard"])
                         gid_ec_r  = _resolve_gid(gid_ec,  ["base dashboard - e-commerce","e-commerce","ecommerce","ec"])
+                        gid_mi_r  = _resolve_gid(gid_mi,  ["meta x investimento","meta x inv","metainv","meta inv"])
                         gid_ac_r  = _resolve_gid(gid_ac,  ["acessos","acesso"])
                         gid_ca_r  = _resolve_gid(gid_ca,  ["campanhas","campanha"])
                     except Exception as e:
@@ -938,6 +987,7 @@ with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
                             st.session_state.sheet_id  = sid
                             st.session_state._gid_ac = gid_ac_r
                             st.session_state._gid_ca = gid_ca_r
+                            st.session_state._gid_mi = gid_mi_r
                             log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas (gid={gid_nf_r})")
                             ok_mp = True
                         else:
@@ -1471,8 +1521,67 @@ with tab_metas:
     })
     st.dataframe(df_tab, use_container_width=True, hide_index=True)
 
+    # ── Meta por Marca (nova aba Meta x Investimento)
+    _sid_mi = st.session_state.get("sheet_id","")
+    _gid_mi = st.session_state.get("_gid_mi","3")
+    _tok_mi = _get_sa_token()
+    df_mi   = load_meta_inv(gid_url(_sid_mi, _gid_mi), _tok_mi) if _sid_mi else pd.DataFrame()
 
-with tab_ec_tab:
+    if not df_mi.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        sh("Meta por Marca — Mês Selecionado")
+        mi = meta_inv_do_mes(df_mi, data_ini.month)
+
+        MARCAS_MI = [
+            ("Seculus",  mi["meta_sec"], COR_MARCA.get("Seculus","#3b6fff")),
+            ("Mondaine", mi["meta_mon"], COR_MARCA.get("Mondaine","#f59e0b")),
+            ("Timex",    mi["meta_tim"], COR_MARCA.get("Timex","#10b981")),
+            ("E-time",   mi["meta_eti"], COR_MARCA.get("E-time","#f43f5e")),
+        ]
+        # Get realized per brand from NF data for the period
+        def _real_marca(marca):
+            df_m = ec_p[ec_p["marca"] == marca] if not ec_p.empty else pd.DataFrame()
+            return float(df_m["receita"].sum()) if not df_m.empty else 0.0
+
+        mi_cols = st.columns(4)
+        for idx, (marca, meta, cor) in enumerate(MARCAS_MI):
+            real  = _real_marca(marca)
+            dif   = real - meta
+            pct   = min(real / meta * 100, 100) if meta > 0 else 0
+            bar_c = "#10b981" if pct >= 100 else ("#f59e0b" if pct >= 70 else "#f43f5e")
+            s_dif = "+" if dif >= 0 else ""
+            dc    = "pos" if dif >= 0 else "neg"
+            with mi_cols[idx]:
+                st.markdown(f"""
+                <div class="mc {'ok' if pct>=100 else ('warn2' if pct>=70 else 'bad')}">
+                  <div class="mc-label" style="color:{cor};">{marca}</div>
+                  <div class="mc-value">{brl(real)}</div>
+                  <div class="mc-sub">
+                    <span class="{dc}">{s_dif}{brl(dif)}</span>
+                    <span class="dot-sep">·</span>
+                    <span class="neu">{pct:.0f}% da meta</span>
+                  </div>
+                  <div class="meta-bar-wrap">
+                    <div class="meta-bar-fill" style="width:{pct:.1f}%;background:{bar_c};"></div>
+                  </div>
+                  <div class="mc-progress-row">
+                    <span class="mc-pct">Meta: {brl(meta)}</span>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        sh("Meta por Marca — Evolução Anual")
+        mi_rows = []
+        for _, row in df_mi.iterrows():
+            for marca, col in [("Seculus","meta_sec"),("Mondaine","meta_mon"),
+                                ("Timex","meta_tim"),("E-time","meta_eti")]:
+                mi_rows.append({"Mês": row["mes_str"], "Marca": marca, "Meta": row[col]})
+        df_mi_long = pd.DataFrame(mi_rows)
+        fig_mi = px.bar(df_mi_long, x="Mês", y="Meta", color="Marca",
+                        color_discrete_map=COR_MARCA, barmode="group",
+                        labels={"Meta":"Meta (R$)","Mês":""})
+        fig_mi.update_layout(**L())
+        st.plotly_chart(fig_mi, use_container_width=True)
     sh("E-commerce — Receita via Notas Fiscais")
     if ec_p.empty:
         st.info("Nenhuma nota fiscal de E-commerce no período selecionado.")
@@ -2101,13 +2210,62 @@ with tab_camp:
             roas_med  = tot_rec_c / tot_inv if tot_inv > 0 else 0
             cpa_med   = tot_inv / tot_trans if tot_trans > 0 else 0
 
+            # Load meta x investimento for ROAS meta and investment targets
+            _sid_ca = st.session_state.get("sheet_id","")
+            _gmi_ca = st.session_state.get("_gid_mi","3")
+            _tok_ca2 = _get_sa_token()
+            df_mi_ca = load_meta_inv(gid_url(_sid_ca, _gmi_ca), _tok_ca2) if _sid_ca else pd.DataFrame()
+            mi_ca    = meta_inv_do_mes(df_mi_ca, data_ini.month)
+
             sh("Resumo de Campanhas do Período")
             ck1,ck2,ck3,ck4,ck5 = st.columns(5)
-            ck1.metric("💸 Investimento", brl(tot_inv))
+            ck1.metric("💸 Investimento", brl(tot_inv),
+                       delta=f"Meta: {brl(mi_ca['meta_inv'])}" if mi_ca["meta_inv"] > 0 else None)
             ck2.metric("💰 Receita",      brl(tot_rec_c))
             ck3.metric("📦 Transações",   f"{tot_trans:,}")
-            ck4.metric("📈 ROAS Médio",   f"{roas_med:.2f}x")
+            # ROAS com meta
+            _roas_delta = f"Meta: {mi_ca['meta_roas']:.2f}x" if mi_ca["meta_roas"] > 0 else None
+            _roas_color = None  # positive if above meta
+            ck4.metric("📈 ROAS Médio",   f"{roas_med:.2f}x",
+                       delta=f"{(roas_med - mi_ca['meta_roas']):+.2f}x vs meta" if mi_ca["meta_roas"] > 0 else None)
             ck5.metric("🎯 CPA Médio",    brl(cpa_med))
+
+            # Investment by brand summary
+            if not df_mi_ca.empty and mi_ca["meta_inv"] > 0:
+                st.markdown("<br>", unsafe_allow_html=True)
+                sh("Meta de Investimento por Marca")
+                MARCAS_INV = [
+                    ("Seculus",  mi_ca["meta_sec"] * 0,  mi_ca["inv_sec"],  COR_MARCA.get("Seculus","#3b6fff")),
+                    ("Mondaine", mi_ca["meta_mon"] * 0,  mi_ca["inv_mon"],  COR_MARCA.get("Mondaine","#f59e0b")),
+                    ("Timex",    mi_ca["meta_tim"] * 0,  mi_ca["inv_tim"],  COR_MARCA.get("Timex","#10b981")),
+                    ("E-time",   mi_ca["meta_eti"] * 0,  mi_ca["inv_eti"],  COR_MARCA.get("E-time","#f43f5e")),
+                ]
+                # Compute meta inv per brand from df_ca_f
+                inv_por_marca = df_ca_f.groupby("marca")["inv"].sum().to_dict() if not df_ca_f.empty else {}
+                inv_cols = st.columns(4)
+                inv_meta_map = {"Seculus": mi_ca["inv_sec"], "Mondaine": mi_ca["inv_mon"],
+                                "Timex": mi_ca["inv_tim"],   "E-time":   mi_ca["inv_eti"]}
+                for idx, marca in enumerate(["Seculus","Mondaine","Timex","E-time"]):
+                    meta_i = inv_meta_map[marca]
+                    real_i = inv_por_marca.get(marca, 0.0)
+                    cor    = COR_MARCA.get(marca,"#3b6fff")
+                    pct_i  = min(real_i/meta_i*100, 100) if meta_i > 0 else 0
+                    bar_c  = "#10b981" if pct_i >= 100 else ("#f59e0b" if pct_i >= 70 else "#3b6fff")
+                    with inv_cols[idx]:
+                        st.markdown(f"""
+                        <div class="mc">
+                          <div class="mc-label" style="color:{cor};">💸 {marca}</div>
+                          <div class="mc-value">{brl(real_i)}</div>
+                          <div class="mc-sub">
+                            <span class="neu">{pct_i:.0f}% do orçamento</span>
+                          </div>
+                          <div class="meta-bar-wrap">
+                            <div class="meta-bar-fill" style="width:{pct_i:.1f}%;background:{bar_c};"></div>
+                          </div>
+                          <div class="mc-progress-row">
+                            <span class="mc-pct">Orçamento: {brl(meta_i)}</span>
+                          </div>
+                        </div>""", unsafe_allow_html=True)
 
             sh("Investimento vs Receita por Campanha")
             camp_agg = (df_ca_f.groupby(["Plataforma","Campanha"])
