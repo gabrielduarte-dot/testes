@@ -1153,176 +1153,179 @@ ts_mp  = st.session_state.ts_mp or "—"
 ts_ec  = st.session_state.ts_ec or "—"
 
 
-with st.expander("⚙️  Fonte de Dados", expanded=not has_mp):
+def _load_from_secrets():
+    """Auto-load spreadsheet from st.secrets[app][sheet_url] if configured."""
+    try:
+        sheet_url = st.secrets["app"]["sheet_url"]
+    except Exception:
+        return
+    if not sheet_url or "/d/" not in sheet_url:
+        return
+    if st.session_state.df_mp_raw is not None:
+        return  # already loaded
+    sid   = sheet_url.split("/d/")[1].split("/")[0]
+    token = _get_sa_token()
+    # Auto-detect GIDs by tab name
+    gid_nf_r = "0"; gid_ec_r = "1"; gid_mi_r = "3"; gid_ac_r = "4"; gid_ca_r = "5"
+    try:
+        sess = requests.Session(); sess.trust_env = False
+        hdrs = {"User-Agent":"Mozilla/5.0"}
+        if token: hdrs["Authorization"] = f"Bearer {token}"
+        rm = sess.get(f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties",
+                      headers=hdrs, timeout=15)
+        rm.raise_for_status()
+        abas     = {str(s["properties"]["sheetId"]): s["properties"]["title"]
+                    for s in rm.json().get("sheets", [])}
+        abas_inv = {v.strip().lower(): k for k, v in abas.items()}
+        def _r(hints):
+            for h in hints:
+                if h in abas_inv: return abas_inv[h]
+            return list(abas.keys())[0] if abas else "0"
+        gid_nf_r = _r(["base dashboard - marketplace","marketplace","nf"])
+        gid_ec_r = _r(["base dashboard - e-commerce","e-commerce","ecommerce"])
+        gid_mi_r = _r(["meta x investimento","meta x inv"])
+        gid_ac_r = _r(["acessos"])
+        gid_ca_r = _r(["campanhas"])
+    except Exception:
+        pass
+    try:
+        raw_mp, ts = load_url(gid_url(sid, gid_nf_r), "mp", token)
+        if raw_mp is not None and not raw_mp.empty:
+            st.session_state.df_mp_raw = raw_mp
+            st.session_state.ts_mp     = ts
+            st.session_state.sheet_id  = sid
+            st.session_state._gid_ac   = gid_ac_r
+            st.session_state._gid_ca   = gid_ca_r
+            st.session_state._gid_mi   = gid_mi_r
+    except Exception:
+        pass
+    try:
+        raw_ec, ts = load_url(gid_url(sid, gid_ec_r), "ec", token)
+        if raw_ec is not None and not raw_ec.empty:
+            st.session_state.df_ec_raw = raw_ec
+            st.session_state.ts_ec     = ts
+    except Exception:
+        pass
+
+_load_from_secrets()
+
+_sa_ok         = _sa_configured()
+_has_secret    = False
+try:
+    _has_secret = bool(st.secrets.get("app", {}).get("sheet_url", ""))
+except Exception:
+    pass
+
+with st.expander("⚙️  Fonte de Dados", expanded=not has_mp and not _has_secret):
     ex1, ex2 = st.columns([3, 1])
     with ex1:
-        st.markdown("**📋 Planilha Unificada (Google Sheets)**")
-
-        _sa_ok = _sa_configured()
-        if _sa_ok:
+        if _has_secret:
             st.markdown(
-                "<div style='font-size:.74rem;padding:8px 12px;margin-bottom:10px;"
-                "background:rgba(16,185,129,.08);border-radius:8px;border:1px solid rgba(16,185,129,.2);color:#34d399;'>"
-                "🔐 <strong>Service Account configurada</strong> — acesso autenticado e seguro. "
-                "A planilha não precisa ser pública.</div>",
+                "<div style='font-size:.74rem;padding:10px 14px;"
+                "background:rgba(16,185,129,.08);border-radius:8px;"
+                "border:1px solid rgba(16,185,129,.2);color:#34d399;'>"
+                "🔒 <strong>Planilha configurada via Secrets</strong> — "
+                "carregada automaticamente. Nenhum link exposto.</div>",
                 unsafe_allow_html=True)
         else:
             st.markdown(
-                "<div style='font-size:.74rem;padding:8px 12px;margin-bottom:10px;"
-                "background:rgba(245,158,11,.08);border-radius:8px;border:1px solid rgba(245,158,11,.2);color:#fbbf24;'>"
-                "⚠️ <strong>Service Account não configurada.</strong> "
-                "Siga o guia abaixo para acessar planilhas privadas com segurança.</div>",
+                "<div style='font-size:.74rem;padding:10px 14px;margin-bottom:8px;"
+                "background:rgba(245,158,11,.08);border-radius:8px;"
+                "border:1px solid rgba(245,158,11,.2);color:#fbbf24;'>"
+                "⚙️ Configure <code>[app]\nsheet_url = \"https://...\"</code> "
+                "nos Secrets do Streamlit para carregamento automático.</div>",
                 unsafe_allow_html=True)
+            sheet_url_m = st.text_input("URL da Planilha (manual)", key="sheet_url_in",
+                                        placeholder="https://docs.google.com/spreadsheets/d/...")
+            gcols = st.columns(6)
+            gid_nf  = gcols[0].text_input("Marketplace", value="0", key="gid_nf")
+            gid_ec  = gcols[1].text_input("E-commerce",  value="1", key="gid_ec")
+            gid_met = gcols[2].text_input("Metas",        value="2", key="gid_met")
+            gid_mi  = gcols[3].text_input("Meta x Inv.", value="3", key="gid_mi")
+            gid_ac  = gcols[4].text_input("Acessos",     value="4", key="gid_ac")
+            gid_ca  = gcols[5].text_input("Campanhas",   value="5", key="gid_ca")
 
-        st.markdown(
-            "<div style='font-size:.74rem;color:#64748b;margin-bottom:8px;'>"
-            "Cole o link da planilha que contém todas as abas: "
-            "<strong>E-commerce · Marketplace · Metas · Acessos · Campanhas</strong></div>",
-            unsafe_allow_html=True)
-        sheet_url = st.text_input("URL da Planilha Google Sheets", key="sheet_url_in",
-                                  placeholder="https://docs.google.com/spreadsheets/d/...")
-        st.markdown(
-            "<div style='font-size:.74rem;color:#64748b;margin-top:6px;'>"
-            "GIDs das abas (0=Marketplace, 1=E-commerce, 2=Metas, 3=Acessos, 4=Campanhas) "
-            "— ajuste se necessário:</div>", unsafe_allow_html=True)
-        gcols = st.columns(6)
-        gid_nf   = gcols[0].text_input("Marketplace",    value="0", key="gid_nf")
-        gid_ec   = gcols[1].text_input("E-commerce",     value="1", key="gid_ec")
-        gid_met  = gcols[2].text_input("Metas",          value="2", key="gid_met")
-        gid_mi   = gcols[3].text_input("Meta x Inv.",    value="3", key="gid_mi")
-        gid_ac   = gcols[4].text_input("Acessos",        value="4", key="gid_ac")
-        gid_ca   = gcols[5].text_input("Campanhas",      value="5", key="gid_ca")
-
-        if st.button("Carregar Planilha", use_container_width=True, key="btn_sheet"):
-            url = sheet_url.strip()
-            if not url:
-                st.warning("Insira a URL da planilha.")
-            elif "/d/" not in url:
-                st.error("URL inválida. Copie o link direto da barra de endereço do Google Sheets.")
-            else:
-                sid   = url.split("/d/")[1].split("/")[0]
-                token = _get_sa_token()
-                log_msgs = []
-                ok_mp = False
-
-                # Auto-detect GIDs by listing sheet tabs
-                with st.spinner("Lendo abas da planilha..."):
-                    try:
-                        sess = requests.Session(); sess.trust_env = False
-                        hdrs = {"User-Agent":"Mozilla/5.0"}
-                        if token: hdrs["Authorization"] = f"Bearer {token}"
-                        rm = sess.get(
-                            f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties",
-                            headers=hdrs, timeout=15)
-                        rm.raise_for_status()
-                        abas = {str(s["properties"]["sheetId"]): s["properties"]["title"]
-                                for s in rm.json().get("sheets", [])}
-                        abas_inv = {v.strip().lower(): k for k, v in abas.items()}
-                        st.info(f"Abas encontradas: {', '.join(abas.values())}")
-
-                        def _resolve_gid(user_input, name_hints):
-                            u = user_input.strip()
-                            if u in abas: return u          # exact gid match
-                            for hint in name_hints:
-                                if hint in abas_inv: return abas_inv[hint]
-                            return u                         # fallback to whatever user typed
-
-                        gid_nf_r  = _resolve_gid(gid_nf,  ["base dashboard - marketplace","marketplace","nf","faturamento","base dashboard"])
-                        gid_ec_r  = _resolve_gid(gid_ec,  ["base dashboard - e-commerce","e-commerce","ecommerce","ec"])
-                        gid_mi_r  = _resolve_gid(gid_mi,  ["meta x investimento","meta x inv","metainv","meta inv"])
-                        gid_ac_r  = _resolve_gid(gid_ac,  ["acessos","acesso"])
-                        gid_ca_r  = _resolve_gid(gid_ca,  ["campanhas","campanha"])
-                    except Exception as e:
-                        st.error(f"Erro ao listar abas: {e}")
-                        gid_nf_r = gid_nf; gid_ec_r = gid_ec
-                        gid_ac_r = gid_ac; gid_ca_r = gid_ca
-
-                with st.spinner("Carregando aba Marketplace/NF..."):
-                    try:
-                        raw_mp, ts_mp_ = load_url(gid_url(sid, gid_nf_r), "mp", token)
-                        if raw_mp is not None and not raw_mp.empty:
-                            st.session_state.df_mp_raw = raw_mp
-                            st.session_state.ts_mp     = ts_mp_
-                            st.session_state.sheet_id  = sid
-                            st.session_state._gid_ac = gid_ac_r
-                            st.session_state._gid_ca = gid_ca_r
-                            st.session_state._gid_mi = gid_mi_r
-                            log_msgs.append(f"✅ Marketplace/NF: {len(raw_mp)} linhas (gid={gid_nf_r})")
-                            ok_mp = True
-                        else:
-                            log_msgs.append(f"❌ Marketplace/NF: sem dados (gid={gid_nf_r})")
-                    except Exception as e:
-                        log_msgs.append(f"❌ Marketplace/NF: {e}")
-
-                with st.spinner("Carregando aba E-commerce..."):
-                    try:
-                        raw_ec, ts_ec_ = load_url(gid_url(sid, gid_ec_r), "ec", token)
-                        if raw_ec is not None and not raw_ec.empty:
-                            st.session_state.df_ec_raw = raw_ec
-                            st.session_state.ts_ec     = ts_ec_
-                            log_msgs.append(f"✅ E-commerce: {len(raw_ec)} linhas (gid={gid_ec_r})")
-                        else:
-                            log_msgs.append(f"⚪ E-commerce: sem dados (gid={gid_ec_r}, opcional)")
-                    except Exception as e:
-                        log_msgs.append(f"⚪ E-commerce: {e} (opcional)")
-
-                for msg in log_msgs:
-                    if msg.startswith("✅"):
-                        st.success(msg)
-                    elif msg.startswith("❌"):
-                        st.error(msg)
-                    else:
-                        st.info(msg)
-
-                if ok_mp:
-                    st.rerun()
+            if st.button("Carregar Planilha", use_container_width=True, key="btn_sheet"):
+                url = sheet_url_m.strip()
+                if not url or "/d/" not in url:
+                    st.error("URL inválida.")
+                else:
+                    sid   = url.split("/d/")[1].split("/")[0]
+                    token = _get_sa_token()
+                    log_msgs = []; ok_mp = False
+                    with st.spinner("Lendo abas da planilha..."):
+                        try:
+                            sess = requests.Session(); sess.trust_env = False
+                            hdrs = {"User-Agent":"Mozilla/5.0"}
+                            if token: hdrs["Authorization"] = f"Bearer {token}"
+                            rm = sess.get(
+                                f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties",
+                                headers=hdrs, timeout=15)
+                            rm.raise_for_status()
+                            abas = {str(s["properties"]["sheetId"]): s["properties"]["title"]
+                                    for s in rm.json().get("sheets", [])}
+                            abas_inv = {v.strip().lower(): k for k, v in abas.items()}
+                            st.info(f"Abas encontradas: {', '.join(abas.values())}")
+                            def _res(ui, hints):
+                                u = ui.strip()
+                                if u in abas: return u
+                                for h in hints:
+                                    if h in abas_inv: return abas_inv[h]
+                                return u
+                            gid_nf_r = _res(gid_nf, ["base dashboard - marketplace","marketplace"])
+                            gid_ec_r = _res(gid_ec, ["base dashboard - e-commerce","e-commerce"])
+                            gid_mi_r = _res(gid_mi, ["meta x investimento","meta x inv"])
+                            gid_ac_r = _res(gid_ac, ["acessos"])
+                            gid_ca_r = _res(gid_ca, ["campanhas"])
+                        except Exception as e:
+                            st.error(f"Erro ao listar abas: {e}")
+                            gid_nf_r=gid_nf; gid_ec_r=gid_ec
+                            gid_mi_r=gid_mi; gid_ac_r=gid_ac; gid_ca_r=gid_ca
+                    with st.spinner("Carregando NF..."):
+                        try:
+                            raw_mp, ts_ = load_url(gid_url(sid, gid_nf_r), "mp", token)
+                            if raw_mp is not None and not raw_mp.empty:
+                                st.session_state.df_mp_raw = raw_mp
+                                st.session_state.ts_mp     = ts_
+                                st.session_state.sheet_id  = sid
+                                st.session_state._gid_ac   = gid_ac_r
+                                st.session_state._gid_ca   = gid_ca_r
+                                st.session_state._gid_mi   = gid_mi_r
+                                log_msgs.append(f"✅ NF: {len(raw_mp)} linhas (gid={gid_nf_r})")
+                                ok_mp = True
+                            else:
+                                log_msgs.append(f"❌ NF: sem dados")
+                        except Exception as e:
+                            log_msgs.append(f"❌ NF: {e}")
+                    with st.spinner("Carregando EC..."):
+                        try:
+                            raw_ec, ts_ = load_url(gid_url(sid, gid_ec_r), "ec", token)
+                            if raw_ec is not None and not raw_ec.empty:
+                                st.session_state.df_ec_raw = raw_ec
+                                st.session_state.ts_ec     = ts_
+                                log_msgs.append(f"✅ EC: {len(raw_ec)} linhas")
+                            else:
+                                log_msgs.append(f"⚪ EC: sem dados (opcional)")
+                        except Exception as e:
+                            log_msgs.append(f"⚪ EC: {e} (opcional)")
+                    for msg in log_msgs:
+                        if msg.startswith("✅"): st.success(msg)
+                        elif msg.startswith("❌"): st.error(msg)
+                        else: st.info(msg)
+                    if ok_mp: st.rerun()
 
     with ex2:
-        _sa_ok = _sa_configured()
         st.markdown("**Status**")
         st.markdown(
             f"{'🟢' if has_mp else '🔴'} Faturamento<br>"
             f"{'🟢' if has_ec else '⚪'} E-commerce<br>"
             f"{'🟢' if st.session_state.get('sheet_id') else '⚪'} Acessos/Campanhas<br>"
-            f"{'🔐' if _sa_ok else '🔓'} Service Account",
+            f"{'🔐' if _sa_ok else '🔓'} Service Account<br>"
+            f"{'🔒' if _has_secret else '🔓'} URL nos Secrets",
             unsafe_allow_html=True)
-        if not _sa_ok:
-            with st.expander("🔐 Como configurar Service Account"):
-                st.markdown("""
-**1. Google Cloud Console**
-- Acesse [console.cloud.google.com](https://console.cloud.google.com)
-- Crie um projeto (ou use um existente)
-- Ative a **Google Sheets API** e a **Google Drive API**
-
-**2. Criar Service Account**
-- IAM e Admin → Contas de serviço → Criar
-- Dê um nome (ex: `dashboard-seculus`)
-- Em **Chaves**, clique Adicionar chave → JSON
-- Baixe o arquivo `.json`
-
-**3. Compartilhar a planilha**
-- No Google Sheets, clique em **Compartilhar**
-- Adicione o e-mail da SA (`...@...iam.gserviceaccount.com`) como **Leitor**
-- A planilha permanece privada
-
-**4. Adicionar ao Streamlit**
-- No Streamlit Cloud: Settings → Secrets
-- Cole o conteúdo abaixo com os dados do JSON:
-
-```toml
-[gcp_service_account]
-type = "service_account"
-project_id = "seu-projeto"
-private_key_id = "..."
-private_key = "-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
-client_email = "dashboard@...iam.gserviceaccount.com"
-client_id = "..."
-token_uri = "https://oauth2.googleapis.com/token"
-```
-""")
         if has_mp:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔄 Limpar dados", use_container_width=True):
+            if st.button("🔄 Atualizar dados", use_container_width=True):
                 for k in ["df_mp_raw","df_ec_raw","ts_mp","ts_ec","sheet_id"]:
                     st.session_state[k] = None
                 load_url.clear()
