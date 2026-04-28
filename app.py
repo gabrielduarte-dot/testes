@@ -1198,6 +1198,15 @@ def _load_from_secrets():
             st.session_state._gid_ac   = gid_ac_r
             st.session_state._gid_ca   = gid_ca_r
             st.session_state._gid_mi   = gid_mi_r
+            # Load EC too before rerun
+            try:
+                raw_ec, ts_ec = load_url(gid_url(sid, gid_ec_r), "ec", token)
+                if raw_ec is not None and not raw_ec.empty:
+                    st.session_state.df_ec_raw = raw_ec
+                    st.session_state.ts_ec     = ts_ec
+            except Exception:
+                pass
+            st.rerun()  # recalculate has_mp with new session state
         else:
             st.session_state._autoload_error = f"NF gid={gid_nf_r}: DataFrame vazio"
     except Exception as e:
