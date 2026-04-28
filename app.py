@@ -1217,7 +1217,9 @@ if not has_mp and not st.session_state.get("_autoload_error_shown"):
     if _err:
         st.session_state._autoload_error_shown = True
         st.warning(f"⚠️ Erro no carregamento automático: {_err}")
-_has_secret    = False
+
+_sa_ok = _sa_configured()
+_has_secret = False
 try:
     _has_secret = bool(st.secrets.get("app", {}).get("sheet_url", ""))
 except Exception:
