@@ -1198,9 +1198,9 @@ def _load_from_secrets():
             st.session_state._gid_ca   = gid_ca_r
             st.session_state._gid_mi   = gid_mi_r
         else:
-            st.session_state._autoload_error = f"NF (gid={gid_nf_r}): sem dados retornados"
+            st.session_state._autoload_error = f"NF gid={gid_nf_r}: DataFrame vazio"
     except Exception as e:
-        st.session_state._autoload_error = f"NF (gid={gid_nf_r}): {e}"
+        st.session_state._autoload_error = f"NF gid={gid_nf_r}: {type(e).__name__}: {str(e)[:300]}"
     try:
         raw_ec, ts = load_url(gid_url(sid, gid_ec_r), "ec", token)
         if raw_ec is not None and not raw_ec.empty:
@@ -1212,11 +1212,9 @@ def _load_from_secrets():
 _load_from_secrets()
 
 # Show autoload errors if any
-if not has_mp and not st.session_state.get("_autoload_error_shown"):
-    _err = st.session_state.get("_autoload_error")
-    if _err:
-        st.session_state._autoload_error_shown = True
-        st.warning(f"⚠️ Erro no carregamento automático: {_err}")
+_err = st.session_state.get("_autoload_error")
+if _err and not has_mp:
+    st.error(f"⚠️ Erro no carregamento automático: {_err}")
 
 _sa_ok = _sa_configured()
 _has_secret = False
