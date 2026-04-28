@@ -1163,6 +1163,7 @@ def _load_from_secrets():
         return
     if st.session_state.df_mp_raw is not None:
         return  # already loaded
+    load_url.clear()  # clear stale cache before fresh load
     sid   = sheet_url.split("/d/")[1].split("/")[0]
     token = _get_sa_token()
     # Auto-detect GIDs by tab name
@@ -1211,27 +1212,9 @@ def _load_from_secrets():
 
 _load_from_secrets()
 
-# ── Debug: test NF load directly if faturamento still empty
-if not has_mp and _sa_configured():
-    try:
-        _sheet_url_debug = st.secrets.get("app", {}).get("sheet_url", "")
-        if _sheet_url_debug and "/d/" in _sheet_url_debug:
-            _sid_debug = _sheet_url_debug.split("/d/")[1].split("/")[0]
-            _tok_debug = _get_sa_token()
-            # List all tabs
-            import requests as _rq
-            _s = _rq.Session(); _s.trust_env = False
-            _h = {"User-Agent":"Mozilla/5.0"}
-            if _tok_debug: _h["Authorization"] = f"Bearer {_tok_debug}"
-            _rm = _s.get(
-                f"https://sheets.googleapis.com/v4/spreadsheets/{_sid_debug}?fields=sheets.properties",
-                headers=_h, timeout=15)
-            _abas_debug = {str(s["properties"]["sheetId"]): s["properties"]["title"]
-                           for s in _rm.json().get("sheets", [])} if _rm.status_code==200 else {}
-            st.error(f"🔍 Debug — Sheet ID: `{_sid_debug}` | Token: `{'✅' if _tok_debug else '❌ vazio'}` | "
-                     f"HTTP: `{_rm.status_code}` | Abas: `{list(_abas_debug.values())}`")
-    except Exception as _de:
-        st.error(f"🔍 Debug erro: {type(_de).__name__}: {_de}")
+_err = st.session_state.get("_autoload_error")
+if _err and not has_mp:
+    st.error(f"⚠️ Erro no carregamento: {_err}")
 
 _sa_ok = _sa_configured()
 _has_secret = False
